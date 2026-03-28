@@ -1,0 +1,49 @@
+@import "tailwindcss";
+
+:root {
+  --background: #eef2f6;
+  --foreground: #18303b;
+  --muted: #68808a;
+  --panel: rgba(255, 255, 255, 0.58);
+  --panel-strong: rgba(255, 255, 255, 0.78);
+  --border-soft: rgba(24, 48, 59, 0.12);
+  --accent: #f4c78d;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-muted: var(--muted);
+  --font-sans: var(--font-manrope);
+  --font-display: var(--font-cormorant);
+  --font-mono: var(--font-geist-mono);
+}
+
+html {
+  background-color: var(--background);
+  color-scheme: light;
+}
+
+body {
+  min-height: 100vh;
+  background: var(--background);
+  background-image:
+    radial-gradient(circle at top left, rgba(214, 232, 245, 0.88), transparent 30%),
+    radial-gradient(circle at top right, rgba(247, 232, 212, 0.82), transparent 28%),
+    radial-gradient(circle at bottom, rgba(224, 238, 234, 0.9), transparent 36%),
+    linear-gradient(160deg, #eef4f7 0%, #e6edf4 46%, #f6efe3 100%);
+  background-attachment: fixed;
+  color: var(--foreground);
+  font-family:
+    var(--font-manrope),
+    "PingFang SC",
+    "Hiragino Sans GB",
+    "Microsoft YaHei",
+    sans-serif;
+  text-rendering: optimizeLegibility;
+}
+
+::selection {
+  background: rgba(244, 199, 141, 0.55);
+  color: #10232c;
+}

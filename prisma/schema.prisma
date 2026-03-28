@@ -1,0 +1,42 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// Chat 表表示“一个聊天会话”。
+// 一次新建聊天，最终会对应这里的一条记录。
+model Chat {
+  id        String    @id @default(cuid())
+  title     String
+  createdAt DateTime  @default(now()) @db.Timestamptz(3)
+  // updatedAt 由数据库 trigger 维护，用来表达“这条会话最近一次被激活是什么时候”。
+  updatedAt DateTime  @default(now()) @db.Timestamptz(3)
+  // 这里不是数据库里真的一列，而是 Prisma 用来表达“一条 Chat 有很多 Message”的关系字段。
+  messages  Message[]
+}
+
+// Message 表表示“聊天里的每一条消息”。
+// 同一个 chatId 下面会同时存 user 和 assistant 两种消息。
+model Message {
+  id        String      @id @default(cuid())
+  // 这是数据库里真正存在的一列，用来指向这条消息属于哪个 Chat。
+  chatId    String
+  role      MessageRole
+  content   String
+  createdAt DateTime    @default(now()) @db.Timestamptz(3)
+  // 这行描述 Message -> Chat 的外键关系。
+  // onDelete: Cascade 表示删除 Chat 时，关联的 Message 也一起删掉。
+  chat      Chat        @relation(fields: [chatId], references: [id], onDelete: Cascade)
+
+  // 我们最常见的查询是“按 chatId 找消息，再按时间排序”，所以这里提前建组合索引。
+  @@index([chatId, createdAt])
+}
+
+// role 用枚举限制住，避免数据库里出现随意字符串。
+enum MessageRole {
+  user
+  assistant
+}

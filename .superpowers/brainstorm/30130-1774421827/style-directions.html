@@ -1,0 +1,100 @@
+<h2>AI Chat 改版方向</h2>
+<p class="subtitle">先只定整体气质。下面 3 个方向都保留左侧会话列表 + 右侧聊天区，但视觉语言完全不同。</p>
+
+<div class="cards">
+  <div class="card" data-choice="a" onclick="toggleSelect(this)">
+    <div class="card-image">
+      <div class="mockup">
+        <div class="mockup-header">A. Warm Editorial Workspace</div>
+        <div class="mockup-body" style="background:linear-gradient(180deg,#fcf7ee,#f1e3cf);padding:18px;border-radius:18px;color:#2f2419;">
+          <div style="display:flex;gap:14px;min-height:260px;">
+            <div style="width:34%;background:rgba(255,250,243,.78);border:1px solid rgba(126,91,52,.18);border-radius:18px;padding:14px;">
+              <div style="font-size:11px;letter-spacing:.24em;text-transform:uppercase;opacity:.62;">Sessions</div>
+              <div style="margin-top:10px;height:42px;border-radius:999px;background:#2f2419;color:#f8f2e8;display:flex;align-items:center;justify-content:center;font-size:12px;">New Chat</div>
+              <div style="margin-top:12px;display:grid;gap:10px;">
+                <div style="background:#fff8ef;border-radius:14px;padding:12px;border:1px solid rgba(126,91,52,.16);">Next.js 路由复盘</div>
+                <div style="background:#d7b37b;color:#24170d;border-radius:14px;padding:12px;">当前会话</div>
+                <div style="background:#fff8ef;border-radius:14px;padding:12px;border:1px solid rgba(126,91,52,.16);">Prisma 关系整理</div>
+              </div>
+            </div>
+            <div style="flex:1;background:#2a211a;border-radius:24px;padding:16px;display:flex;flex-direction:column;gap:12px;">
+              <div style="align-self:flex-end;max-width:66%;background:#f2c57d;color:#24170d;border-radius:18px 18px 6px 18px;padding:12px 14px;">帮我解释一下 App Router</div>
+              <div style="max-width:78%;background:#45362c;color:#f8efe3;border-radius:18px 18px 18px 6px;padding:12px 14px;">我会从页面、布局、服务端组件和接口这几层来拆开讲。</div>
+              <div style="margin-top:auto;background:#1f1813;border:1px solid rgba(242,197,125,.22);border-radius:20px;padding:14px;color:#ccb8a2;">输入区更像工作台，强调专注与质感</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>A. 暖色编辑部感</h3>
+      <p>更像高质感写作工作台，偏米杏、焦糖、深咖，适合长时间对话和知识整理。</p>
+    </div>
+  </div>
+
+  <div class="card" data-choice="b" onclick="toggleSelect(this)">
+    <div class="card-image">
+      <div class="mockup">
+        <div class="mockup-header">B. Sharp Dark Console</div>
+        <div class="mockup-body" style="background:linear-gradient(180deg,#101317,#050608);padding:18px;border-radius:18px;color:#eff4fb;">
+          <div style="display:flex;gap:14px;min-height:260px;">
+            <div style="width:34%;background:rgba(16,20,26,.9);border:1px solid rgba(123,146,168,.18);border-radius:18px;padding:14px;">
+              <div style="font-size:11px;letter-spacing:.24em;text-transform:uppercase;color:#7f93ab;">History</div>
+              <div style="margin-top:10px;height:42px;border-radius:12px;background:#d7f36a;color:#0f1418;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;">Create</div>
+              <div style="margin-top:12px;display:grid;gap:10px;">
+                <div style="background:#161b22;border-radius:14px;padding:12px;color:#b9c6d3;">System design</div>
+                <div style="background:#d7f36a;color:#0f1418;border-radius:14px;padding:12px;">Current thread</div>
+                <div style="background:#161b22;border-radius:14px;padding:12px;color:#b9c6d3;">SQL notes</div>
+              </div>
+            </div>
+            <div style="flex:1;background:rgba(8,11,16,.96);border-radius:24px;padding:16px;display:flex;flex-direction:column;gap:12px;border:1px solid rgba(123,146,168,.14);">
+              <div style="align-self:flex-end;max-width:66%;background:#d7f36a;color:#0f1418;border-radius:18px 18px 6px 18px;padding:12px 14px;">解释 streaming response</div>
+              <div style="max-width:78%;background:#121821;color:#eaf2fa;border-radius:18px 18px 18px 6px;padding:12px 14px;">前端通过 ReadableStream 逐段读取，界面会边收边渲染。</div>
+              <div style="margin-top:auto;background:#0b1015;border:1px solid rgba(123,146,168,.18);border-radius:20px;padding:14px;color:#8fa2b5;">更锋利、偏工程感，适合做“AI 开发助手”气质</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>B. 冷峻专业控制台</h3>
+      <p>深色、硬朗、信息密度更高，像开发者工具或 AI IDE 面板，科技感最强。</p>
+    </div>
+  </div>
+
+  <div class="card" data-choice="c" onclick="toggleSelect(this)">
+    <div class="card-image">
+      <div class="mockup">
+        <div class="mockup-header">C. Airy Glass Canvas</div>
+        <div class="mockup-body" style="background:linear-gradient(160deg,#eef7f4,#dfeaf8 52%,#f8efe4);padding:18px;border-radius:18px;color:#17303d;">
+          <div style="display:flex;gap:14px;min-height:260px;">
+            <div style="width:34%;background:rgba(255,255,255,.56);backdrop-filter:blur(10px);border:1px solid rgba(23,48,61,.12);border-radius:22px;padding:14px;">
+              <div style="font-size:11px;letter-spacing:.24em;text-transform:uppercase;opacity:.56;">Chats</div>
+              <div style="margin-top:10px;height:42px;border-radius:999px;background:#17303d;color:#f5fbff;display:flex;align-items:center;justify-content:center;font-size:12px;">Start</div>
+              <div style="margin-top:12px;display:grid;gap:10px;">
+                <div style="background:rgba(255,255,255,.7);border-radius:16px;padding:12px;">React Compiler</div>
+                <div style="background:#17303d;color:#f5fbff;border-radius:16px;padding:12px;">当前会话</div>
+                <div style="background:rgba(255,255,255,.7);border-radius:16px;padding:12px;">API 设计</div>
+              </div>
+            </div>
+            <div style="flex:1;background:rgba(255,255,255,.42);backdrop-filter:blur(14px);border-radius:28px;padding:16px;display:flex;flex-direction:column;gap:12px;border:1px solid rgba(23,48,61,.12);">
+              <div style="align-self:flex-end;max-width:66%;background:#f5c88b;color:#213845;border-radius:18px 18px 6px 18px;padding:12px 14px;">帮我优化这个聊天页</div>
+              <div style="max-width:78%;background:rgba(255,255,255,.72);color:#17303d;border-radius:18px 18px 18px 6px;padding:12px 14px;">我们可以先提升层次、留白、对比度和输入区反馈。</div>
+              <div style="margin-top:auto;background:rgba(255,255,255,.62);border:1px solid rgba(23,48,61,.1);border-radius:22px;padding:14px;color:#4f6772;">更轻盈、更产品化，适合做通用 AI 聊天工具</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>C. 轻透产品感</h3>
+      <p>半透明卡片、浅色渐变和更轻的层次，更现代，也更接近 SaaS 产品首页的精致感。</p>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <div class="label">只回答一个问题</div>
+  <h3>你更喜欢哪一版的整体方向？</h3>
+  <p class="subtitle">可以直接回复 A / B / C，也可以说“想要 A 的配色 + C 的轻盈感”这种混搭偏好。</p>
+</div>
