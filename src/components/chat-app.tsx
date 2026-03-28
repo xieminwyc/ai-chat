@@ -3,6 +3,8 @@
 import dayjs from "dayjs";
 import { FormEvent, useEffect, useRef, useState } from "react";
 
+import { createBrowserId } from "@/lib/browser-id";
+
 type ChatMessage = {
   id: string;
   role: "user" | "assistant";
@@ -257,7 +259,7 @@ export function ChatApp() {
     }
 
     const userMessage: ChatMessage = {
-      id: crypto.randomUUID(),
+      id: createBrowserId(),
       role: "user",
       content: message,
     };
@@ -268,7 +270,7 @@ export function ChatApp() {
     setError(null);
 
     try {
-      const assistantMessageId = crypto.randomUUID();
+      const assistantMessageId = createBrowserId();
       const response = await fetch("/api/chat", {
         method: "POST",
         headers: {
