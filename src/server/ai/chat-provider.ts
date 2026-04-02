@@ -20,13 +20,17 @@ const STUDY_ASSISTANT_SYSTEM_PROMPT = `
 - 尽量给出下一步可执行建议
 `.trim();
 
-const siliconFlow = process.env.SILICONFLOW_API_KEY
-  ? new OpenAI({
-      apiKey: process.env.SILICONFLOW_API_KEY,
-      baseURL:
-        process.env.SILICONFLOW_BASE_URL ?? "https://api.siliconflow.cn/v1",
-    })
-  : null;
+function getSiliconFlowClient() {
+  if (!process.env.SILICONFLOW_API_KEY) {
+    return null;
+  }
+
+  return new OpenAI({
+    apiKey: process.env.SILICONFLOW_API_KEY,
+    baseURL:
+      process.env.SILICONFLOW_BASE_URL ?? "https://api.siliconflow.cn/v1",
+  });
+}
 
 function createChatTitle(message: string, normalizedMessage: string) {
   if (normalizedMessage.includes("next") && normalizedMessage.includes("react")) {
@@ -94,6 +98,8 @@ export function createAssistantReply(
 }
 
 export async function streamAssistantReply(messages: ConversationMessage[]) {
+  const siliconFlow = getSiliconFlowClient();
+
   if (!siliconFlow) {
     throw new Error("SILICONFLOW_API_KEY is not configured");
   }

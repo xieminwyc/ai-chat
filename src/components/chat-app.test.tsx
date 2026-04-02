@@ -1,3 +1,4 @@
+import dayjs from "dayjs";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -366,6 +367,8 @@ describe("ChatApp", () => {
   });
 
   it("shows a formatted updated time for each chat", async () => {
+    const updatedAt = "2026-03-25T03:06:31.474Z";
+
     vi.spyOn(global, "fetch").mockResolvedValue({
       ok: true,
       json: async () => ({
@@ -373,7 +376,7 @@ describe("ChatApp", () => {
           {
             id: "chat_1",
             title: "带时间的会话",
-            updatedAt: "2026-03-25T03:06:31.474Z",
+            updatedAt,
           },
         ],
       }),
@@ -382,7 +385,9 @@ describe("ChatApp", () => {
     render(<ChatApp />);
 
     expect(await screen.findByText("带时间的会话")).toBeInTheDocument();
-    expect(screen.getByText("2026-03-25 11:06")).toBeInTheDocument();
+    expect(
+      screen.getByText(dayjs(updatedAt).format("YYYY-MM-DD HH:mm")),
+    ).toBeInTheDocument();
   });
 
   it("starts a fresh chat when clicking the new chat button", async () => {
