@@ -152,9 +152,7 @@ export function ChatApp() {
         syncChatIdToUrl(savedChatId);
       } catch (error) {
         setError(
-          error instanceof Error
-            ? error.message
-            : "初始化聊天页面时出错了",
+          error instanceof Error ? error.message : "初始化聊天页面时出错了",
         );
       }
     }
@@ -240,6 +238,7 @@ export function ChatApp() {
   }
 
   function handleStartNewChat() {
+    console.log("Starting a new chat...");
     // 新建聊天时先清空当前会话状态，下一次发送消息时后端会自动创建新的 Chat。
     setChatId(null);
     setMessages([]);
@@ -452,7 +451,9 @@ export function ChatApp() {
               ) : (
                 <div className="space-y-2">
                   {chats.map((chat) => {
-                    const formattedUpdatedAt = formatChatUpdatedAt(chat.updatedAt);
+                    const formattedUpdatedAt = formatChatUpdatedAt(
+                      chat.updatedAt,
+                    );
                     const isActive = chat.id === chatId;
 
                     return (
@@ -571,7 +572,8 @@ export function ChatApp() {
                     把灵感、问题和暂时说不清的想法，都放进这里慢慢整理。
                   </p>
                   <p className="mt-2 max-w-2xl text-sm leading-7 text-slate-500">
-                    这次布局参考了主流 AI 聊天产品常见的方式: 把主要高度留给消息区，把欢迎内容压缩到真正空态时才出现。
+                    这次布局参考了主流 AI 聊天产品常见的方式:
+                    把主要高度留给消息区，把欢迎内容压缩到真正空态时才出现。
                   </p>
 
                   {error ? (
@@ -601,7 +603,10 @@ export function ChatApp() {
               onSubmit={handleSubmit}
             >
               <div className="mx-auto w-full max-w-4xl">
-                <label className="text-sm font-medium text-slate-700" htmlFor="chat-input">
+                <label
+                  className="text-sm font-medium text-slate-700"
+                  htmlFor="chat-input"
+                >
                   请输入消息
                 </label>
                 <div className="mt-3 rounded-[1.7rem] border border-[rgba(24,48,59,0.1)] bg-white/88 p-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.9)]">
@@ -614,7 +619,8 @@ export function ChatApp() {
                   />
                   <div className="mt-3 flex flex-col gap-3 border-t border-[rgba(24,48,59,0.08)] pt-3 sm:flex-row sm:items-end sm:justify-between">
                     <p className="max-w-xl text-xs leading-6 text-slate-500">
-                      当前回复来自服务端 SiliconFlow 模型流式输出，聊天记录会继续保存到
+                      当前回复来自服务端 SiliconFlow
+                      模型流式输出，聊天记录会继续保存到
                       PostgreSQL，方便你回到同一段上下文。
                     </p>
                     <button
