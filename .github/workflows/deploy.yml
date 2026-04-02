@@ -51,5 +51,8 @@ jobs:
           SERVER_PORT: ${{ secrets.SERVER_PORT }}
           SERVER_USER: ${{ secrets.SERVER_USER }}
         run: |
-          ssh -p "$SERVER_PORT" "$SERVER_USER@$SERVER_HOST" \
+          ssh \
+            -o ServerAliveInterval=30 \
+            -o ServerAliveCountMax=10 \
+            -p "$SERVER_PORT" "$SERVER_USER@$SERVER_HOST" \
             "cd /root/apps/ai-chat && bash scripts/deploy.sh"
