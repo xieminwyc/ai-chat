@@ -1,0 +1,53 @@
+# 这个 workflow 只负责“自动检查代码能不能上线”，不负责真正部署。
+name: CI
+
+on:
+  # 提交 PR 到 main 时，自动跑一遍检查。
+  pull_request:
+    branches:
+      - main
+  # 代码真的 push 到 main 时，也要再跑一遍，作为部署前的最后校验。
+  push:
+    branches:
+      - main
+
+jobs:
+  verify:
+    # GitHub 提供的 Ubuntu 运行环境。
+    runs-on: ubuntu-latest
+    env:
+      # 标记当前运行在 CI 环境中。
+      CI: true
+      # 这些是给构建和测试用的占位值，不是真实线上密钥。
+      # 目的只是让构建阶段不因为缺环境变量直接报错。
+      DATABASE_URL: postgresql://ci:ci@localhost:5432/ai_chat_app
+      SILICONFLOW_API_KEY: test-key
+      SILICONFLOW_BASE_URL: https://api.siliconflow.cn/v1
+      SILICONFLOW_MODEL: Qwen/Qwen2.5-7B-Instruct
+    steps:
+      # 把仓库代码拉到当前 runner 里。
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      # 安装指定版本的 Node.js，并开启 npm 依赖缓存。
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      # 按 lockfile 安装依赖，保证 CI 环境和本地依赖版本一致。
+      - name: Install dependencies
+        run: npm ci
+
+      # 先跑 lint，检查代码规范和明显错误。
+      - name: Run ESLint
+        run: npm run lint
+
+      # 再跑测试，确保核心逻辑没有回归。
+      - name: Run tests
+        run: npm run test
+
+      # 最后做一次生产构建，确认项目在真实上线模式下能编译通过。
+      - name: Build the app
+        run: npm run build

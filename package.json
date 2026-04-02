@@ -3,12 +3,21 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev",
+    "dev": "APP_ENV=local node scripts/env.mjs next dev",
+    "dev:local": "APP_ENV=local node scripts/env.mjs next dev",
+    "dev:test": "APP_ENV=test node scripts/env.mjs next dev",
+    "dev:pro": "APP_ENV=production node scripts/env.mjs next dev",
     "postinstall": "prisma generate",
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test": "vitest run"
+    "test": "vitest run",
+    "prisma:generate": "APP_ENV=local node scripts/env.mjs prisma generate",
+    "prisma:generate:test": "APP_ENV=test node scripts/env.mjs prisma generate",
+    "prisma:generate:pro": "APP_ENV=production node scripts/env.mjs prisma generate",
+    "prisma:migrate:deploy": "APP_ENV=local node scripts/env.mjs prisma migrate deploy",
+    "prisma:migrate:deploy:test": "APP_ENV=test node scripts/env.mjs prisma migrate deploy",
+    "prisma:migrate:deploy:pro": "APP_ENV=production node scripts/env.mjs prisma migrate deploy"
   },
   "dependencies": {
     "@prisma/adapter-pg": "^7.5.0",

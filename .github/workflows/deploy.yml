@@ -1,0 +1,52 @@
+# 这个 workflow 负责“自动部署到服务器”。
+# 它不直接监听 push，而是等 CI 成功后再启动。
+name: Deploy
+
+on:
+  workflow_run:
+    # 监听名为 CI 的 workflow。
+    workflows:
+      - CI
+    # 只有当 CI 整个流程结束后，才会触发这里。
+    types:
+      - completed
+
+jobs:
+  deploy:
+    # 这里只允许“push 到 main 且 CI 成功”的情况触发部署。
+    # 这样 PR 检查虽然会跑 CI，但不会误发布到线上。
+    if: >-
+      ${{
+        github.event.workflow_run.conclusion == 'success' &&
+        github.event.workflow_run.event == 'push' &&
+        github.event.workflow_run.head_branch == 'main'
+      }}
+    runs-on: ubuntu-latest
+    steps:
+      # 准备 SSH 登录服务器所需的私钥和 known_hosts。
+      - name: Prepare SSH
+        env:
+          # 这些值来自 GitHub Secrets，需要你在仓库设置页里手动配置。
+          SERVER_HOST: ${{ secrets.SERVER_HOST }}
+          SERVER_PORT: ${{ secrets.SERVER_PORT }}
+          SERVER_USER: ${{ secrets.SERVER_USER }}
+          SERVER_SSH_KEY: ${{ secrets.SERVER_SSH_KEY }}
+        run: |
+          # 创建 ~/.ssh 目录，并限制权限。
+          install -m 700 -d ~/.ssh
+          # 把 GitHub Secret 里的私钥写入临时文件。
+          printf '%s\n' "$SERVER_SSH_KEY" > ~/.ssh/id_ed25519
+          # 私钥权限必须足够严格，否则 ssh 会拒绝使用。
+          chmod 600 ~/.ssh/id_ed25519
+          # 预先写入服务器指纹，避免首次连接时交互确认。
+          ssh-keyscan -p "$SERVER_PORT" -H "$SERVER_HOST" >> ~/.ssh/known_hosts
+
+      # 真正的部署动作：SSH 登录服务器，然后执行服务器上的 deploy.sh。
+      - name: Deploy on server
+        env:
+          SERVER_HOST: ${{ secrets.SERVER_HOST }}
+          SERVER_PORT: ${{ secrets.SERVER_PORT }}
+          SERVER_USER: ${{ secrets.SERVER_USER }}
+        run: |
+          ssh -p "$SERVER_PORT" "$SERVER_USER@$SERVER_HOST" \
+            "cd /root/apps/ai-chat && bash scripts/deploy.sh"

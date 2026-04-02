@@ -1,7 +1,7 @@
-import dotenv from "dotenv";
 import { defineConfig, env } from "prisma/config";
+import { loadSelectedEnv } from "./scripts/env.mjs";
 
-dotenv.config({ path: ".env.local" });
+loadSelectedEnv();
 
 export default defineConfig({
   schema: "prisma/schema.prisma",
