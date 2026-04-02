@@ -5,6 +5,7 @@ set -euo pipefail
 APP_DIR="/root/apps/ai-chat"
 HEALTHCHECK_URL="http://127.0.0.1:3000"
 NPM_REGISTRY="https://registry.npmmirror.com"
+DEPLOY_ARTIFACT_PATH="${1:-}"
 
 run_with_heartbeat() {
   local label="$1"
@@ -44,6 +45,10 @@ git_path_changed() {
 
   if [ "${diff_exit_code}" -eq 1 ]; then
     return 0
+  fi
+
+  if [ "${diff_exit_code}" -eq 0 ]; then
+    return 1
   fi
 
   return "${diff_exit_code}"
@@ -92,8 +97,22 @@ fi
 echo "[deploy] running prisma migrations"
 run_with_heartbeat "running prisma migrations" npx prisma migrate deploy
 
-echo "[deploy] building next app"
-run_with_heartbeat "building next app" npm run build
+if [ -n "${DEPLOY_ARTIFACT_PATH}" ]; then
+  if [ ! -f "${DEPLOY_ARTIFACT_PATH}" ]; then
+    echo "[deploy] build artifact not found: ${DEPLOY_ARTIFACT_PATH}" >&2
+    exit 1
+  fi
+
+  echo "[deploy] verifying CI build artifact"
+  tar -tzf "${DEPLOY_ARTIFACT_PATH}" >/dev/null
+
+  echo "[deploy] publishing CI build artifact from ${DEPLOY_ARTIFACT_PATH}"
+  rm -rf .next
+  tar -xzf "${DEPLOY_ARTIFACT_PATH}" -C "${APP_DIR}"
+else
+  echo "[deploy] building next app"
+  run_with_heartbeat "building next app" npm run build
+fi
 
 echo "[deploy] restarting pm2 process"
 pm2 restart ai-chat

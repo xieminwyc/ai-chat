@@ -27,11 +27,11 @@ jobs:
     steps:
       # 把仓库代码拉到当前 runner 里。
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       # 安装指定版本的 Node.js，并开启 npm 依赖缓存。
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: 22
           cache: npm
@@ -51,3 +51,15 @@ jobs:
       # 最后做一次生产构建，确认项目在真实上线模式下能编译通过。
       - name: Build the app
         run: npm run build
+
+      # 把 CI 里产出的 .next 打包出来，供后续 Deploy workflow 直接发布。
+      - name: Package build artifact
+        run: tar -czf deploy-artifact.tgz .next
+
+      # 上传构建产物，Deploy workflow 会按本次 CI 的 run id 下载它。
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: next-build-artifact
+          path: deploy-artifact.tgz
+          retention-days: 3

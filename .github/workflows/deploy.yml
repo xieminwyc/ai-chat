@@ -11,6 +11,10 @@ on:
     types:
       - completed
 
+permissions:
+  actions: read
+  contents: read
+
 jobs:
   deploy:
     # 这里只允许“push 到 main 且 CI 成功”的情况触发部署。
@@ -23,6 +27,51 @@ jobs:
       }}
     runs-on: ubuntu-latest
     steps:
+      # 下载触发本次 Deploy 的那次 CI 构建产物。
+      - name: Download build artifact metadata
+        uses: actions/github-script@v8
+        id: download-artifact
+        with:
+          script: |
+            const artifactName = 'next-build-artifact'
+            const runId = context.payload.workflow_run.id
+            const { data } = await github.rest.actions.listWorkflowRunArtifacts({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              run_id: runId,
+            })
+
+            const artifact = data.artifacts.find((item) => item.name === artifactName)
+
+            if (!artifact) {
+              core.setFailed(`Artifact "${artifactName}" not found for workflow run ${runId}`)
+              return
+            }
+
+            const download = await github.rest.actions.downloadArtifact({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              artifact_id: artifact.id,
+              archive_format: 'zip',
+            })
+
+            const fs = require('node:fs')
+            const path = require('node:path')
+
+            const outputDir = path.join(process.env.RUNNER_TEMP, 'deploy-artifact')
+            fs.mkdirSync(outputDir, { recursive: true })
+
+            const zipPath = path.join(outputDir, 'artifact.zip')
+            fs.writeFileSync(zipPath, Buffer.from(download.data))
+
+            core.setOutput('zip-path', zipPath)
+
+      # 解压出真正的 deploy-artifact.tgz，后面通过 scp 传到服务器。
+      - name: Unpack build artifact
+        run: |
+          unzip -o "${{ steps.download-artifact.outputs.zip-path }}" -d "${RUNNER_TEMP}/deploy-artifact/unpacked"
+          ls -lah "${RUNNER_TEMP}/deploy-artifact/unpacked"
+
       # 准备 SSH 登录服务器所需的私钥和 known_hosts。
       - name: Prepare SSH
         env:
@@ -44,7 +93,21 @@ jobs:
           # 预先写入服务器指纹，避免首次连接时交互确认。
           ssh-keyscan -p "$SERVER_PORT" -H "$SERVER_HOST" >> ~/.ssh/known_hosts
 
-      # 真正的部署动作：SSH 登录服务器，然后执行服务器上的 deploy.sh。
+      # 先把 CI 生成好的 .next 构建产物上传到服务器临时目录。
+      - name: Upload build artifact to server
+        env:
+          SERVER_HOST: ${{ secrets.SERVER_HOST }}
+          SERVER_PORT: ${{ secrets.SERVER_PORT }}
+          SERVER_USER: ${{ secrets.SERVER_USER }}
+        run: |
+          scp \
+            -o ServerAliveInterval=30 \
+            -o ServerAliveCountMax=10 \
+            -P "$SERVER_PORT" \
+            "${RUNNER_TEMP}/deploy-artifact/unpacked/deploy-artifact.tgz" \
+            "$SERVER_USER@$SERVER_HOST:/tmp/ai-chat-deploy-artifact.tgz"
+
+      # 真正的部署动作：SSH 登录服务器，执行 deploy.sh，并让它直接发布 CI 构建产物。
       - name: Deploy on server
         env:
           SERVER_HOST: ${{ secrets.SERVER_HOST }}
@@ -55,4 +118,4 @@ jobs:
             -o ServerAliveInterval=30 \
             -o ServerAliveCountMax=10 \
             -p "$SERVER_PORT" "$SERVER_USER@$SERVER_HOST" \
-            "cd /root/apps/ai-chat && bash scripts/deploy.sh"
+            "cd /root/apps/ai-chat && bash scripts/deploy.sh /tmp/ai-chat-deploy-artifact.tgz && rm -f /tmp/ai-chat-deploy-artifact.tgz"
