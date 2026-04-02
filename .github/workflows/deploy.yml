@@ -35,7 +35,8 @@ jobs:
           # 创建 ~/.ssh 目录，并限制权限。
           install -m 700 -d ~/.ssh
           # 把 GitHub Secret 里的私钥写入临时文件，并去掉可能混入的 Windows 回车。
-          printf '%s' "$SERVER_SSH_KEY" | tr -d '\r' > ~/.ssh/id_ed25519
+          # 这里要补一个结尾换行，否则 OpenSSH 私钥可能会被识别为无效文件。
+          printf '%s\n' "$SERVER_SSH_KEY" | tr -d '\r' > ~/.ssh/id_ed25519
           # 私钥权限必须足够严格，否则 ssh 会拒绝使用。
           chmod 600 ~/.ssh/id_ed25519
           # 先校验私钥格式，避免后面只看到模糊的 libcrypto 错误。
