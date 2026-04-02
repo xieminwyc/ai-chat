@@ -118,4 +118,4 @@ jobs:
             -o ServerAliveInterval=30 \
             -o ServerAliveCountMax=10 \
             -p "$SERVER_PORT" "$SERVER_USER@$SERVER_HOST" \
-            "cd /root/apps/ai-chat && bash scripts/deploy.sh /tmp/ai-chat-deploy-artifact.tgz && rm -f /tmp/ai-chat-deploy-artifact.tgz"
+            "cd /root/apps/ai-chat && git pull origin main && bash scripts/deploy.sh /tmp/ai-chat-deploy-artifact.tgz && rm -f /tmp/ai-chat-deploy-artifact.tgz"
