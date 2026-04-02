@@ -5,8 +5,27 @@ import { prisma } from "@/lib/prisma";
 
 export const runtime = "nodejs";
 
+function logInfo(event: string, details: Record<string, unknown> = {}) {
+  console.log(`[chat-api] ${event}`, details);
+}
+
+function logError(
+  event: string,
+  error: unknown,
+  details: Record<string, unknown> = {},
+) {
+  console.error(`[chat-api] ${event}`, {
+    ...details,
+    error: error instanceof Error ? error.message : String(error),
+  });
+}
+
+function getDurationMs(startedAt: number) {
+  return Date.now() - startedAt;
+}
+
 async function getConversationMessages(chatId: string) {
-  return prisma.message.findMany({
+  const messages = await prisma.message.findMany({
     where: { chatId },
     orderBy: { createdAt: "asc" },
     select: {
@@ -14,11 +33,19 @@ async function getConversationMessages(chatId: string) {
       content: true,
     },
   });
+
+  logInfo("conversation.loaded", {
+    chatId,
+    messageCount: messages.length,
+  });
+
+  return messages;
 }
 
 function createStreamingChatResponse(
   chatId: string,
   replyStream: AsyncIterable<string>,
+  startedAt: number,
 ) {
   const encoder = new TextEncoder();
 
@@ -54,12 +81,21 @@ function createStreamingChatResponse(
             });
           }
 
+          logInfo("post.success", {
+            chatId,
+            replyLength: assistantReply.length,
+            durationMs: getDurationMs(startedAt),
+          });
+
           // 明确告诉浏览器：这条流已经发完了。
           controller.close();
         } catch (error) {
           // 如果模型请求或数据库写入出错，就让这条流以错误结束。
           // 前端读取 response.body 时就能感知到这次流式请求失败了。
-          console.error("SiliconFlow stream failed:", error);
+          logError("post.stream_error", error, {
+            chatId,
+            durationMs: getDurationMs(startedAt),
+          });
           controller.error(error);
         }
       },
@@ -78,11 +114,15 @@ function createStreamingChatResponse(
 }
 
 export async function GET(request: Request) {
+  const startedAt = Date.now();
+
   try {
     const { searchParams } = new URL(request.url);
     const chatId = searchParams.get("chatId");
 
     if (!chatId) {
+      logInfo("get.list.start");
+
       // 不带 chatId 时返回会话列表，给左侧 chat list 使用。
       const chats = await prisma.chat.findMany({
         // 会话列表按最近活跃时间倒序排，更符合真实聊天产品的直觉。
@@ -94,8 +134,16 @@ export async function GET(request: Request) {
           updatedAt: true,
         },
       });
+
+      logInfo("get.list.success", {
+        chatCount: chats.length,
+        durationMs: getDurationMs(startedAt),
+      });
+
       return NextResponse.json({ chats });
     }
+
+    logInfo("get.messages.start", { chatId });
 
     // 读取某个会话的全部历史消息，并按创建时间排序返回给前端。
     const messages = await prisma.message.findMany({
@@ -109,21 +157,32 @@ export async function GET(request: Request) {
         createdAt: true,
       },
     });
+
+    logInfo("get.messages.success", {
+      chatId,
+      messageCount: messages.length,
+      durationMs: getDurationMs(startedAt),
+    });
+
     return NextResponse.json({ chatId, messages });
   } catch (error) {
-    console.error("Chat history route failed:", error);
+    logError("get.error", error, {
+      durationMs: getDurationMs(startedAt),
+    });
 
     return NextResponse.json(
       {
         error:
           error instanceof Error ? error.message : "Chat history route failed",
       },
-      { status: 500 }
+      { status: 500 },
     );
   }
 }
 
 export async function DELETE(request: Request) {
+  const startedAt = Date.now();
+
   try {
     const { searchParams } = new URL(request.url);
     const chatId = searchParams.get("chatId");
@@ -131,30 +190,44 @@ export async function DELETE(request: Request) {
     if (!chatId) {
       return NextResponse.json(
         { error: "chatId is required" },
-        { status: 400 }
+        { status: 400 },
       );
     }
+
+    logInfo("delete.start", { chatId });
 
     // 删除 Chat 时，数据库会根据 schema 里的 onDelete: Cascade 自动删掉相关 Message。
     await prisma.chat.delete({
       where: { id: chatId },
     });
 
+    logInfo("delete.success", {
+      chatId,
+      durationMs: getDurationMs(startedAt),
+    });
+
     return NextResponse.json({ success: true });
   } catch (error) {
-    console.error("Delete chat route failed:", error);
+    const chatId = new URL(request.url).searchParams.get("chatId");
+
+    logError("delete.error", error, {
+      chatId,
+      durationMs: getDurationMs(startedAt),
+    });
 
     return NextResponse.json(
       {
         error:
           error instanceof Error ? error.message : "Delete chat route failed",
       },
-      { status: 500 }
+      { status: 500 },
     );
   }
 }
 
 export async function PATCH(request: Request) {
+  const startedAt = Date.now();
+
   try {
     const { searchParams } = new URL(request.url);
     const chatId = searchParams.get("chatId");
@@ -166,16 +239,18 @@ export async function PATCH(request: Request) {
     if (!chatId) {
       return NextResponse.json(
         { error: "chatId is required" },
-        { status: 400 }
+        { status: 400 },
       );
     }
 
     if (!title) {
-      return NextResponse.json(
-        { error: "title is required" },
-        { status: 400 }
-      );
+      return NextResponse.json({ error: "title is required" }, { status: 400 });
     }
+
+    logInfo("patch.start", {
+      chatId,
+      titleLength: title.length,
+    });
 
     const chat = await prisma.chat.update({
       where: { id: chatId },
@@ -187,21 +262,33 @@ export async function PATCH(request: Request) {
       },
     });
 
+    logInfo("patch.success", {
+      chatId,
+      durationMs: getDurationMs(startedAt),
+    });
+
     return NextResponse.json({ chat });
   } catch (error) {
-    console.error("Rename chat route failed:", error);
+    const chatId = new URL(request.url).searchParams.get("chatId");
+
+    logError("patch.error", error, {
+      chatId,
+      durationMs: getDurationMs(startedAt),
+    });
 
     return NextResponse.json(
       {
         error:
           error instanceof Error ? error.message : "Rename chat route failed",
       },
-      { status: 500 }
+      { status: 500 },
     );
   }
 }
 
 export async function POST(request: Request) {
+  const startedAt = Date.now();
+
   try {
     const body = (await request.json()) as {
       chatId?: string;
@@ -212,9 +299,14 @@ export async function POST(request: Request) {
     if (!message) {
       return NextResponse.json(
         { error: "message is required" },
-        { status: 400 }
+        { status: 400 },
       );
     }
+
+    logInfo("post.start", {
+      chatId: body.chatId ?? null,
+      messageLength: message.length,
+    });
 
     // 如果前端已经带了 chatId，就继续写进现有会话；否则后面新建一条会话。
     const chat = body.chatId
@@ -233,6 +325,11 @@ export async function POST(request: Request) {
         },
       }));
 
+    logInfo("post.chat_ready", {
+      chatId: activeChat.id,
+      isNewChat: !chat,
+    });
+
     // 先保存用户消息，再保存助手回复。这样数据库里的聊天记录顺序就和真实对话一致。
     await prisma.message.create({
       data: {
@@ -247,15 +344,17 @@ export async function POST(request: Request) {
     const replyStream = await streamAssistantReply(conversationMessages);
 
     // 这里直接返回文本流给浏览器，前端会边收边显示，不用等整段回复生成完。
-    return createStreamingChatResponse(activeChat.id, replyStream);
+    return createStreamingChatResponse(activeChat.id, replyStream, startedAt);
   } catch (error) {
-    console.error("Chat route failed:", error);
+    logError("post.error", error, {
+      durationMs: getDurationMs(startedAt),
+    });
 
     return NextResponse.json(
       {
         error: error instanceof Error ? error.message : "Chat route failed",
       },
-      { status: 500 }
+      { status: 500 },
     );
   }
 }
