@@ -6,13 +6,13 @@
 | --- | --- |
 | 文档主题 | AI Chat 项目 CI/CD 与环境变量分层设计 |
 | 面向对象 | 项目 owner、后续实施者、未来回看部署链路的自己 |
-| 当前阶段 | 从手动部署升级到最小可用自动化部署 |
+| 当前阶段 | 已落地实现版 |
 | 目标仓库 | `AI Chat` |
-| 推荐方向 | `CI + SSH 自动部署 + 服务器 deploy.sh + 本地多环境命令` |
+| 最终方向 | `CI 校验 + CI 构建产物 + Deploy 发布产物 + 服务器本地 env` |
 
-## 背景与目标
+## 背景
 
-当前项目已经完成了这条手动部署链路：
+项目最初已经打通过手动部署链路：
 
 ```text
 本地开发
@@ -26,483 +26,481 @@
 -> 公网访问
 ```
 
-下一阶段不再重复练习手动部署，而是把已经验证可行的部署步骤整理成一套最小可用的 CI/CD 结构，并同时解决环境变量管理不够清晰的问题。
+后续在自动化过程中，实际踩到过几类问题：
 
-本次设计目标有 4 个：
+1. 服务器每次部署都完整 `npm ci`，非常慢。
+2. 长时间无输出时，GitHub Actions 的 SSH 会话容易出现 `Broken pipe`。
+3. 如果 deploy 脚本本身发生变化，而部署入口是“先执行旧脚本，再在脚本里 `git pull`”，那么脚本修复通常要下一次部署才生效。
+4. CI 与服务器环境变量职责不清时，构建和 Prisma 初始化容易出现误解。
 
-1. 把 `lint / test / build` 放进 GitHub Actions，形成 CI。
-2. 在 `push main` 后自动触发服务器部署，形成第一版 CD。
-3. 让服务器自动部署与手动部署共享同一套部署脚本，降低维护成本。
-4. 引入本地可切换的环境变量方案，支持 `npm run dev:test` 和 `npm run dev:pro` 这类命令。
+因此，这份文档不再记录“最初理想方案”，而是直接记录当前仓库已经落地的真实实现。
 
-## 一期范围
+## 最终结论
 
-本次设计只覆盖以下内容：
+当前版本最终采用：
 
-- `.github/workflows/ci.yml`
-- `.github/workflows/deploy.yml`
-- 仓库内的环境变量加载方案
-- `prisma.config.ts` 的环境变量读取方式调整
-- 服务器上的 `scripts/deploy.sh`
-- README 的项目说明、启动方式、环境变量说明、部署说明
+- `ci.yml` 负责 `lint / test / build`
+- CI 构建成功后，把 `.next` 打包成 artifact
+- `deploy.yml` 在 `CI` 成功后触发
+- `deploy.yml` 下载 CI artifact，并通过 `scp` 上传到服务器
+- 服务器执行 `scripts/deploy.sh`
+- `deploy.sh` 继续负责：
+  - `git pull`
+  - 按需安装依赖
+  - 按需重新生成 Prisma Client
+  - `prisma migrate deploy`
+  - 发布 CI 产物或本地兜底 build
+  - `pm2 restart`
+  - 健康检查
 
-## 一期不做
-
-- Docker 镜像部署
-- 多环境发布流水线
-- 自动回滚
-- 蓝绿部署
-- preview 环境
-- 把线上真实业务密钥同步保存在 GitHub
-
-## 方案选型
-
-### 方案 A：单个 workflow 同时处理 CI 和部署
-
-优点：
-
-- 文件少
-- 最容易快速跑通
-
-不足：
-
-- CI 和部署职责混在一起
-- 后续扩展环境、权限和手动触发会变乱
-
-### 方案 B：`ci.yml` 与 `deploy.yml` 分离
-
-优点：
-
-- 结构清楚
-- 符合常见团队实践
-- 后续更容易扩展 staging / production
-
-不足：
-
-- 比单文件方案多一点理解成本
-
-### 方案 C：部署命令写死在 workflow 中
-
-优点：
-
-- 上手直接
-
-不足：
-
-- 自动部署和手动部署走两套逻辑
-- 排查线上问题时不够直观
-
-### 推荐方案
-
-推荐采用：
-
-`方案 B + 服务器 deploy.sh`
-
-也就是：
-
-- GitHub 上拆分 `ci.yml` 和 `deploy.yml`
-- 服务器上维护一份 `deploy.sh`
-- GitHub Actions 通过 SSH 登录服务器，只负责调用 `deploy.sh`
-
-推荐原因：
-
-- 这最贴近当前已经打通的手动部署链路
-- 自动与手动部署共用一套命令，排查成本低
-- 后续学 Docker 时，也能清楚看见“脚本式部署”和“镜像式部署”的边界
-
-## 目标结构
-
-### GitHub 侧
+也就是说，当前线上部署的真实形态已经从：
 
 ```text
-.github/
-  workflows/
-    ci.yml
-    deploy.yml
+GitHub Actions -> SSH 进服务器 -> 服务器自己 build
 ```
 
-### 仓库侧
+升级成：
 
 ```text
+GitHub Actions CI build
+-> 上传 .next 构建产物
+-> Deploy workflow 下载 artifact
+-> scp 到服务器
+-> 服务器发布该产物
+```
+
+这比“服务器自己完整构建”更稳，也更少依赖服务器临时网络状态。
+
+## 当前架构
+
+### 应用运行架构
+
+```text
+Browser
+-> Nginx :80
+-> Next.js :3000
+-> Neon PostgreSQL
+```
+
+### 自动部署架构
+
+```text
+push main
+-> CI workflow
+-> npm ci
+-> lint
+-> test
+-> build
+-> 打包 .next 为 deploy-artifact.tgz
+-> 上传 artifact
+-> Deploy workflow
+-> 下载 artifact
+-> scp artifact 到服务器 /tmp
+-> SSH 登录服务器
+-> git pull 最新 main
+-> 执行 scripts/deploy.sh /tmp/ai-chat-deploy-artifact.tgz
+-> 迁移数据库
+-> 发布 .next 产物
+-> pm2 restart ai-chat
+-> 健康检查
+```
+
+## 目标文件
+
+当前落地的关键文件为：
+
+```text
+.github/workflows/ci.yml
+.github/workflows/deploy.yml
+scripts/deploy.sh
+scripts/env.mjs
+prisma.config.ts
 .env.example
-.env.local
 .env.test
 .env.production
 README.md
-prisma.config.ts
-scripts/
-  env.mjs
-```
-
-### 服务器侧
-
-```text
-/root/apps/ai-chat/
-  scripts/
-    deploy.sh
 ```
 
 ## CI 设计
 
 ### 触发规则
 
-- `pull_request` 到 `main` 时运行
-- `push` 到 `main` 时运行
+- `pull_request` 到 `main`
+- `push` 到 `main`
 
-### 目标
+### 职责
 
-证明当前提交至少满足：
+CI 只负责验证和构建，不负责真正 SSH 上线。
 
-- 依赖可安装
-- 代码通过 lint
-- 单元测试通过
-- 项目可成功生产构建
+当前 CI 具体负责：
 
-### 核心步骤
+1. 安装依赖
+2. 执行 `eslint`
+3. 执行 `vitest`
+4. 执行生产构建
+5. 将 `.next` 打包成 `deploy-artifact.tgz`
+6. 上传名为 `next-build-artifact` 的 artifact
+
+### 当前实际步骤
 
 ```text
-checkout
--> setup node
+actions/checkout
+-> actions/setup-node
 -> npm ci
 -> npm run lint
 -> npm run test
 -> npm run build
+-> tar -czf deploy-artifact.tgz .next
+-> actions/upload-artifact
 ```
 
 ### 环境变量策略
 
-CI 不使用真实生产密钥，而是使用安全占位值。
-
-原因：
-
-- CI 的目标是验证代码链路，不是连接真实线上模型服务
-- 当前测试已能通过 mock 和 `process.env` 覆盖关键分支
-- 真实 API key 和数据库连接串不应暴露给每次构建
-
-CI 如需环境变量，只注入最小占位值，例如：
+CI 不使用真实线上密钥，只注入最小占位值：
 
 - `DATABASE_URL`
 - `SILICONFLOW_API_KEY`
 - `SILICONFLOW_BASE_URL`
 - `SILICONFLOW_MODEL`
 
-这些值用于让构建和必要初始化不报缺失错误，不代表真的调用线上资源。
+这些值只用于：
 
-## CD 设计
+- 让构建链路不因缺环境变量而直接失败
+- 让测试和初始化过程满足最低依赖
+
+CI 不负责连接真实生产数据库和真实模型服务。
+
+## Deploy 设计
 
 ### 触发规则
 
-- `push` 到 `main`
-- 只有在 CI 成功后才继续部署
+Deploy workflow 通过 `workflow_run` 监听 `CI`：
 
-### workflow 依赖方式
+- 仅当 `CI` 成功
+- 且事件来源是 `push`
+- 且分支是 `main`
 
-推荐让 `deploy.yml` 依赖 `ci.yml` 的成功结果，而不是单纯和 `ci.yml` 并行触发。
+时才执行部署。
 
-第一版可接受的实现方式包括：
+这意味着：
 
-- `workflow_run` 监听 `ci.yml` 成功后再启动部署
-- 或在同一 workflow 内通过 `needs` 串联，但这不属于当前推荐结构
+- PR 会跑 CI，但不会自动发布
+- 只有真正 push 到 `main` 的代码，才会触发线上部署
 
-本次设计优先推荐：
+### 当前实际步骤
 
-- `ci.yml` 独立负责校验
-- `deploy.yml` 使用 `workflow_run` 只在 `ci.yml` 成功且分支为 `main` 时触发
+当前 [deploy.yml](/Users/xiemin/monter/AI%20Chat/.github/workflows/deploy.yml) 的实际流程是：
 
-### 整体流程
+1. 从触发本次 Deploy 的那次 CI run 中查找 `next-build-artifact`
+2. 下载 artifact zip
+3. 解压出 `deploy-artifact.tgz`
+4. 准备 SSH 私钥和 `known_hosts`
+5. 用 `scp` 把 `deploy-artifact.tgz` 上传到服务器 `/tmp/ai-chat-deploy-artifact.tgz`
+6. SSH 登录服务器
+7. 先执行一次 `git pull origin main`
+8. 再执行：
 
-```text
-push main
--> ci.yml 成功
--> deploy.yml 启动
--> GitHub Actions 读取 SSH secrets
--> SSH 登录阿里云服务器
--> 执行 /root/apps/ai-chat/scripts/deploy.sh
--> 部署日志回传到 Actions
+```bash
+bash scripts/deploy.sh /tmp/ai-chat-deploy-artifact.tgz
 ```
 
-### GitHub Secrets
+### 为什么 Deploy workflow 里要先 `git pull`
 
-第一版只需要保存 SSH 连接相关 secrets：
+这是后续排障后补的关键点。
 
-- `SERVER_HOST`
-- `SERVER_USER`
-- `SERVER_PORT`
-- `SERVER_SSH_KEY`
+原因是：
 
-不把真实业务环境变量搬到 GitHub 的原因：
+- 如果部署入口一开始执行的是服务器上的旧版 `deploy.sh`
+- 而 `deploy.sh` 内部才去 `git pull`
+- 那么当前这次部署仍然会按旧脚本继续执行
+- 新脚本修复通常要下一次部署才生效
 
-- 当前生产环境已经稳定放在服务器本地
-- 服务器本地 `.env.local` 更贴合现有部署结构
-- 第一版先把自动化流程跑稳，再考虑是否引入更复杂的 secret 分发机制
+为了避免这个坑，现在 deploy workflow 在远端入口处先 `git pull`，再执行脚本，这样当前这次部署就能直接使用最新版脚本。
 
 ## 服务器 `deploy.sh` 设计
 
-### 职责
+### 核心职责
 
-`deploy.sh` 是服务器上的唯一部署入口，负责执行已经验证可行的手动部署步骤。
+当前 [deploy.sh](/Users/xiemin/monter/AI%20Chat/scripts/deploy.sh) 是服务器上的统一部署入口。
 
-### 标准流程
+它支持两种模式：
+
+1. 带 CI artifact 的自动部署模式
+2. 不带 artifact 的手动兜底模式
+
+### 当前实际流程
 
 ```text
 进入项目目录
--> 拉取 main 最新代码
--> 安装依赖
+-> 记录 PREVIOUS_HEAD
+-> git pull origin main
+-> 记录 CURRENT_HEAD
+-> 判断依赖文件是否变化
+-> 如有必要才执行 npm ci
+-> 如有必要才执行 prisma generate
 -> 执行 prisma migrate deploy
--> 执行 next build
+-> 如果传入 artifact：
+   -> 校验 artifact
+   -> 替换 .next
+-> 否则：
+   -> 本地执行 npm run build
 -> pm2 restart ai-chat
--> 做健康检查
+-> 健康检查
 ```
 
-### 具体要求
+### 依赖跳过策略
 
-- 使用 `set -e`，任一步失败立刻停止
-- 每个阶段打印清晰日志，便于看 GitHub Actions 输出
-- 健康检查失败时返回非 0，明确标记部署失败
+这部分是当前部署提速的关键。
 
-### 健康检查建议
+脚本会比较 `PREVIOUS_HEAD` 和 `CURRENT_HEAD` 是否改动了这些文件：
 
-第一版健康检查可以先保持简单，例如：
+- `package.json`
+- `package-lock.json`
+- `.npmrc`
+- `patches/` 目录
 
-- 检查本机 `3000` 端口服务可访问
-- 或访问应用首页 / 某个轻量 GET 接口
+只有这些依赖相关内容变化时，才会重新执行 `npm ci`。
 
-第一版不要求做完整的自动回滚逻辑。
+否则会打印：
 
-## 环境变量分层设计
+```text
+[deploy] dependency files unchanged, skipping npm ci
+```
 
-### 文件约定
+这能避免每次部署都重新安装依赖。
 
-仓库中采用以下文件：
+### Prisma Client 重新生成策略
+
+如果本次部署没有重新安装依赖，但以下文件发生变化：
+
+- `prisma/schema.prisma`
+- `prisma.config.ts`
+
+脚本会单独执行一次：
+
+```bash
+npx prisma generate
+```
+
+这样能保证 Prisma Client 和最新 schema 保持一致，但不必为此重新完整安装全部依赖。
+
+### 心跳日志设计
+
+为避免长时间静默导致 SSH 会话断开，脚本对长耗时步骤使用 `run_with_heartbeat` 包装：
+
+- `npm ci`
+- `prisma generate`
+- `prisma migrate deploy`
+- `npm run build`
+
+如果步骤执行较久，日志会周期性输出：
+
+```text
+[deploy] ... still running (xxs elapsed)
+```
+
+这样更方便：
+
+- 在 GitHub Actions 里确认它没有假死
+- 排查真正慢的是哪个阶段
+
+### Artifact 发布模式
+
+如果 `deploy.sh` 收到了一个 artifact 路径参数，例如：
+
+```bash
+bash scripts/deploy.sh /tmp/ai-chat-deploy-artifact.tgz
+```
+
+它会：
+
+1. 先校验该 tar 包可读
+2. 删除服务器当前 `.next`
+3. 解压 CI 生成的 `.next` 到项目目录
+
+此时服务器不会再执行 `npm run build`。
+
+如果没有传 artifact，脚本仍然会走本地兜底：
+
+```bash
+npm run build
+```
+
+这保证了：
+
+- 自动部署时优先复用 CI 构建产物
+- 手动部署时仍然有后备路径
+
+## 环境变量分层
+
+### 当前约定
+
+项目当前约定的环境文件为：
 
 - `.env.example`
 - `.env.local`
 - `.env.test`
 - `.env.production`
 
-### 各文件职责
+### 真实职责
 
-` .env.example `
+- `.env.example`
+  - 只放示例值
+  - 提交到仓库
 
-- 提交到 GitHub
-- 只放变量名与示例值
-- 用于提示开发者需要哪些变量
+- `.env.local`
+  - 本地开发真实值
+  - 服务器线上真实值
+  - 不提交
 
-` .env.local `
+- `.env.test`
+  - 本地测试链路切换时使用
 
-- 本地真实开发配置
-- 不提交到 GitHub
-- 默认本地开发命令使用它
+- `.env.production`
+  - 本地模拟生产风格配置时使用
 
-` .env.test `
+### 当前 env loader 实现
 
-- 用于本地切换到“测试链路配置”
-- 可提交到 GitHub，但只能放安全值、假值或可公开的测试配置
-- 不放真实私密 key
+[scripts/env.mjs](/Users/xiemin/monter/AI%20Chat/scripts/env.mjs) 会根据 `APP_ENV` 选择：
 
-` .env.production `
+- `local -> .env.local`
+- `test -> .env.test`
+- `production/pro/prod -> .env.production`
 
-- 用于本地模拟“偏生产的连接配置”
-- 如果提交到 GitHub，也只能放示例值或非敏感默认值
-- 线上真实密钥仍只保存在服务器本地
-
-### 命令命名
-
-保留用户期望的命名方式：
+项目当前脚本中：
 
 - `npm run dev`
 - `npm run dev:local`
 - `npm run dev:test`
 - `npm run dev:pro`
 
-对应含义：
+都会先通过 `scripts/env.mjs` 把目标 env 文件注入 `process.env`。
 
-- `dev` / `dev:local`：本地开发，加载 `.env.local`
-- `dev:test`：本地开发服务器，但加载 `.env.test`
-- `dev:pro`：本地开发服务器，但加载 `.env.production`
+### Prisma 配置
 
-### 关键约束
+[prisma.config.ts](/Users/xiemin/monter/AI%20Chat/prisma.config.ts) 也复用了同一套 env loader。
 
-命令名可以叫 `test` / `pro`，但不直接把 `NODE_ENV` 切成 `test` 或 `production` 来驱动 `next dev`。
+这意味着：
 
-原因：
+- 应用本身
+- Prisma CLI
+- 本地多环境命令
 
-- `next dev` 本质是开发服务器，应保持开发模式
-- Next.js 官方对 `NODE_ENV=test` 有专门的 `.env.test` 加载语义
-- 如果直接滥用 `NODE_ENV`，容易把 `Next`、`Vitest`、`Prisma` 的行为混在一起
+现在都走同一套环境变量选择逻辑。
 
-因此推荐引入自定义环境标识，例如：
+## GitHub Secrets
 
-- `APP_ENV=local`
-- `APP_ENV=test`
-- `APP_ENV=production`
+当前 GitHub 仅保存 SSH 连接相关 secret：
 
-然后由仓库内统一的 env loader 根据 `APP_ENV` 选择加载哪个文件。
+- `SERVER_HOST`
+- `SERVER_PORT`
+- `SERVER_USER`
+- `SERVER_SSH_KEY`
 
-### 与 Next.js 默认加载规则的关系
+线上真实业务变量没有搬到 GitHub，仍然保留在服务器本地 `.env.local`。
 
-Next.js 在 `next dev` 下仍会自动读取 `.env.local`。为了让 `dev:test` 和 `dev:pro` 生效，env loader 需要在启动 `next dev` 之前先把目标文件中的变量注入 `process.env`。
+这样做的原因是：
 
-这样可以利用 Next.js 官方的优先级规则：
+1. 当前部署仍然是 SSH 到现有服务器执行
+2. 线上真实配置已经稳定保存在服务器
+3. 第一阶段先把自动化链路跑稳，避免把“部署问题”和“secret 分发系统”混在一起
 
-`process.env` 优先于 `.env.*`
+## 当前方案的优点
 
-结果就是：
+### 1. 比纯服务器构建更稳
 
-- `dev` / `dev:local` 仍然主要依赖 `.env.local`
-- `dev:test` 可用 `.env.test` 覆盖相同 key
-- `dev:pro` 可用 `.env.production` 覆盖相同 key
+生产构建现在优先在 GitHub Actions 完成，减少了服务器临时网络、CPU 和内存抖动对构建阶段的影响。
 
-## `prisma.config.ts` 设计
+### 2. 比完整镜像方案更轻
 
-### 当前问题
+不需要现在就引入 Docker 镜像仓库、镜像拉取、容器编排等复杂度。
 
-当前 `prisma.config.ts` 写死读取 `.env.local`，会带来两个问题：
+### 3. 仍保留手动兜底能力
 
-1. Prisma 命令无法跟随 `dev:test` / `dev:pro` 切换。
-2. 应用和 Prisma 的环境选择逻辑不一致，后续容易排查困难。
+即使 artifact 发布链路临时有问题，服务器上的 `deploy.sh` 仍然能作为本地 build 的后备方案。
 
-### 目标
+### 4. 依赖不变时部署明显更快
 
-让 Prisma 和应用共用同一套环境选择规则。
+跳过 `npm ci` 后，绝大部分日常改动不会再被完整装依赖拖慢。
 
-### 推荐实现
+## 当前方案的边界
 
-- 在仓库内新增一个统一 env loader，例如 `scripts/env.mjs`
-- 由它根据 `APP_ENV` 解析目标 env 文件
-- `prisma.config.ts` 调用同一套逻辑，不再写死 `.env.local`
+当前实现仍然不是最终极形态，它还保留一些刻意接受的现实折中：
 
-这样后续命令就能扩展为：
+1. 服务器上仍然保留源码仓库
+2. 服务器仍然可能在依赖变化时执行 `npm ci`
+3. 数据库迁移仍然在服务器上执行
+4. 发布单位目前是 `.next` 产物，不是完整 standalone 包
+5. 没有自动回滚
+6. 没有 staging / production 多环境发布
 
-- `npm run prisma:generate`
-- `npm run prisma:generate:test`
-- `npm run prisma:generate:pro`
-- `npm run prisma:migrate:test`
-- `npm run prisma:migrate:pro`
+这些都属于后续可继续演进的方向，但不属于当前这一版最小可用自动化部署的范围。
 
-第一版不要求一次把所有 Prisma 命令都补齐，但至少要把环境加载机制先统一。
+## 建议的观察点
 
-## README 设计
+### CI 成功时应看到
 
-当前 README 还是模板内容，需要替换为真实项目说明。
+- `Run ESLint`
+- `Run tests`
+- `Build the app`
+- `Upload build artifact`
 
-### README 至少包含
+### Deploy 成功时应看到
 
-- 项目简介
-- 当前技术栈
-- 主要目录说明
-- 本地启动方式
-- 环境变量说明
-- 测试与构建命令
-- 线上部署结构
-- CI/CD 流程说明
+- `Download build artifact metadata`
+- `Unpack build artifact`
+- `Upload build artifact to server`
+- `Deploy on server`
 
-### README 应回答的问题
+### 服务器部署日志里应重点关注
 
-- 这个项目是做什么的
-- 本地第一次拉下来怎么跑
-- 需要准备哪些环境变量
-- `dev` / `dev:test` / `dev:pro` 各自是什么意思
-- 当前线上是怎么部署的
-- 自动部署依赖哪些 GitHub secrets
-
-## 数据流与职责边界
-
-### 本地开发链路
+如果依赖没变化：
 
 ```text
-npm run dev[:target]
--> env loader 读取目标 env 文件
--> Next.js 开发服务器启动
--> Prisma 与 AI provider 读取统一 process.env
+[deploy] dependency files unchanged, skipping npm ci
 ```
 
-### 自动部署链路
+如果是 artifact 发布路径：
 
 ```text
-开发者 push main
--> GitHub Actions CI 校验
--> GitHub Actions Deploy
--> SSH 登录服务器
--> deploy.sh
--> 服务器本地 .env.local
--> Next.js + Prisma + PM2
+[deploy] publishing CI build artifact from /tmp/ai-chat-deploy-artifact.tgz
 ```
 
-### 责任划分
+如果最终成功：
 
-- GitHub Actions：触发、校验、连接服务器
-- `deploy.sh`：执行服务器部署步骤
-- 服务器 `.env.local`：承载真实线上配置
-- env loader：为本地命令和 Prisma 统一选择环境文件
+```text
+[deploy] deployment completed
+```
 
-## 错误处理与失败策略
+## 未来可升级方向
 
-### CI 失败
+在当前版本基础上，后续值得继续演进的方向有：
 
-- 直接阻止部署
-- 用户在 PR / Actions 页面看失败项
+1. 把 `.next` artifact 升级为 Next standalone 产物
+2. 让服务器进一步减少对源码仓库的依赖
+3. 增加自动回滚
+4. 增加 staging 环境
+5. 引入更完善的部署日志归档
 
-### SSH 连接失败
+但在当前阶段，这些都不如“先让主链路稳定、可观察、少折腾”更重要。
 
-- `deploy.yml` 标红
-- 不会影响服务器当前已运行版本
+## 最终结论
 
-### migration 失败
+截至当前版本，AI Chat 的 CI/CD 与环境变量分层已经落地为：
 
-- `deploy.sh` 立即退出
-- `pm2 restart` 不应继续执行
+- `ci.yml` 负责代码校验与生产构建
+- CI 把 `.next` 打成 artifact
+- `deploy.yml` 在 CI 成功后下载 artifact 并上传到服务器
+- 服务器通过 `deploy.sh` 执行统一发布逻辑
+- 依赖未变时跳过 `npm ci`
+- Prisma schema 变化时按需 `prisma generate`
+- 自动部署优先发布 CI 构建产物，而不是在服务器重新 build
+- 线上真实环境变量继续保存在服务器本地 `.env.local`
 
-### build 失败
+这套方案已经能满足当前项目阶段最重要的目标：
 
-- `deploy.sh` 立即退出
-- 当前已在线版本继续保留
-
-### 健康检查失败
-
-- 部署流程标红
-- 提醒人工排查服务状态、日志和 PM2
-
-## 测试策略
-
-本次设计的验证重点包括：
-
-- `ci.yml` 能在 GitHub Actions 跑通
-- `deploy.yml` 能在 CI 成功后触发
-- `deploy.sh` 可手动执行，也可被 Actions 调用
-- `dev:test` / `dev:pro` 能切换到对应环境文件
-- `prisma.config.ts` 不再写死读取 `.env.local`
-- README 能清楚说明项目与部署方式
-
-### 一期实现后的最小验收标准
-
-满足以下条件即可认为一期达标：
-
-- PR 能自动跑 `lint/test/build`
-- `main` 提交能自动触发部署
-- 自动部署失败时日志可读
-- 本地能通过 npm scripts 在 `.env.local`、`.env.test`、`.env.production` 间切换
-- README 不再是默认模板
-
-## 开放问题
-
-以下问题本次设计先不阻塞实施，但应在后续演进时再判断：
-
-- 是否需要为测试环境引入独立数据库
-- 是否需要为部署脚本增加备份与回滚
-- 是否要把服务器 root 用户替换为专用 deploy 用户
-- 什么时候进入 Docker 化部署
-
-## 结论
-
-第一版最适合当前项目的路径不是直接上 Docker，而是先把已验证的服务器部署经验产品化为一套最小 CI/CD。
-
-推荐落地方案为：
-
-- GitHub 使用 `ci.yml + deploy.yml`
-- 服务器使用统一 `deploy.sh`
-- 本地引入 `APP_ENV` 驱动的环境文件选择机制
-- Prisma 改为跟随统一 env loader
-- README 更新为真实项目说明
-
-这能在不大幅增加复杂度的前提下，让项目从“会手动部署”进入“理解并拥有可重复自动部署链路”的阶段。
+- 自动化
+- 可观察
+- 比原来更稳
+- 比原来更快
+- 仍然保留手动兜底空间

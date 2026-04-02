@@ -374,7 +374,7 @@ export function ChatApp() {
                 AI Chat Studio
               </h1>
               <p className="mt-2 text-sm leading-6 text-slate-600">
-                更接近真实聊天工具的布局，主要空间留给对话本身。
+                更接近真实聊天工具的布局，主要空间留给对话本身
               </p>
               <button
                 className="mt-4 inline-flex min-h-11 w-full items-center justify-center rounded-full bg-[linear-gradient(135deg,#18303b,#355b6d)] px-4 py-3 text-sm font-semibold text-white shadow-[0_14px_28px_rgba(24,48,59,0.24)] transition hover:translate-y-[-1px] hover:shadow-[0_18px_32px_rgba(24,48,59,0.26)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-500/40 disabled:cursor-not-allowed disabled:opacity-60"
