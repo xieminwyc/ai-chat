@@ -67,6 +67,8 @@ COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
 # standalone 的 file tracing 有时漏掉 Prisma 生成的客户端，手动补上
 COPY --from=builder --chown=nextjs:nodejs /app/node_modules/.prisma ./node_modules/.prisma
 COPY --from=builder --chown=nextjs:nodejs /app/node_modules/@prisma ./node_modules/@prisma
+# prisma schema + migration 文件（docker-deploy.sh 用临时容器跑 migrate 时需要）
+COPY --from=builder --chown=nextjs:nodejs /app/prisma ./prisma
 
 # 切换到普通用户（之后的命令和容器启动都以这个用户身份运行）
 USER nextjs

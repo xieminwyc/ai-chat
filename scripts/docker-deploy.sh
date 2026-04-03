@@ -43,7 +43,7 @@ log "running database migrations..."
 docker compose -f "$COMPOSE_FILE" run --rm \
   --entrypoint "" \
   ai-chat \
-  sh -c "npx prisma migrate deploy" || {
+  sh -c "npx --yes prisma migrate deploy --schema=prisma/schema.prisma" || {
   log "migration failed, aborting deployment"
   exit 1
 }
