@@ -1,7 +1,7 @@
 #!/bin/bash
 # 服务器上的 Docker 部署脚本
 # 由 GitHub Actions Deploy workflow 通过 SSH 触发执行
-# 职责：登录 GHCR → 拉取最新镜像 → 重启容器 → 数据库迁移 → 健康检查
+# 职责：登录 ACR → 拉取最新镜像 → 重启容器 → 数据库迁移 → 健康检查
 set -e
 
 PROJECT_DIR="/root/apps/ai-chat"
@@ -22,15 +22,15 @@ log "working directory: $PROJECT_DIR"
 log "pulling latest code..."
 git pull origin main
 
-# ── 3. 登录 GHCR，让 docker compose pull 能拉到私有镜像 ──────
-# GHCR_TOKEN 需要提前在服务器 ~/.bashrc 或 /etc/environment 里配置：
-#   export GHCR_TOKEN=<Personal Access Token，需要 read:packages 权限>
-# 公开仓库的镜像可以跳过这一步
-if [ -n "$GHCR_TOKEN" ]; then
-  log "logging in to GHCR..."
-  echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USER" --password-stdin
+# ── 3. 登录阿里云 ACR ──────────────────────────────────────────
+# ACR_PASSWORD 需要提前在服务器 ~/.bashrc 或 /etc/environment 里配置：
+#   export ACR_PASSWORD=<阿里云容器镜像服务密码>
+# 仓库设置为公开时可跳过登录
+if [ -n "$ACR_PASSWORD" ]; then
+  log "logging in to Alibaba Cloud ACR..."
+  echo "$ACR_PASSWORD" | docker login crpi-y387mtxqhofw4ibe.cn-guangzhou.personal.cr.aliyuncs.com -u "$ACR_USERNAME" --password-stdin
 else
-  log "GHCR_TOKEN not set, skipping login (only works for public images)"
+  log "ACR_PASSWORD not set, skipping login (only works for public images)"
 fi
 
 # ── 4. 拉取最新镜像 ─────────────────────────────────────────

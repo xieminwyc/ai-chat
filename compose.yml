@@ -1,8 +1,8 @@
 services:
   ai-chat:
-    # 线上镜像地址：CI 构建后推送到 GHCR，服务器从这里 pull
+    # 线上镜像地址：CI 构建后推送到阿里云 ACR，服务器从这里 pull
     # 本地测试时可临时改成 ai-chat:local
-    image: ghcr.io/xieminwyc/ai-chat:latest
+    image: crpi-y387mtxqhofw4ibe.cn-guangzhou.personal.cr.aliyuncs.com/xieminwyc/ai-chat:latest
     # 容器崩溃自动重启，除非手动执行 docker compose stop
     restart: unless-stopped
     ports:

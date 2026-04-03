@@ -53,29 +53,25 @@ jobs:
     # PR 只跑 verify，只有真正 push 到 main 才构建并推送镜像。
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
-    permissions:
-      # 推送镜像到 GHCR 需要写入 packages 权限。
-      packages: write
-      contents: read
     steps:
       - name: Check out repository
         uses: actions/checkout@v6
 
-      # 登录 GitHub Container Registry（GHCR）。
-      # GITHUB_TOKEN 是 Actions 自动提供的，不需要手动配置 Secret。
-      - name: Log in to GHCR
+      # 登录阿里云 ACR（容器镜像服务）。
+      # 需要在 GitHub Secrets 中配置 ACR_USERNAME 和 ACR_PASSWORD。
+      - name: Log in to Alibaba Cloud ACR
         uses: docker/login-action@v3
         with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+          registry: crpi-y387mtxqhofw4ibe.cn-guangzhou.personal.cr.aliyuncs.com
+          username: ${{ secrets.ACR_USERNAME }}
+          password: ${{ secrets.ACR_PASSWORD }}
 
       # 生成镜像的 tag：latest + git commit sha（方便回溯）。
       - name: Extract Docker metadata
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ghcr.io/${{ github.repository_owner }}/ai-chat
+          images: crpi-y387mtxqhofw4ibe.cn-guangzhou.personal.cr.aliyuncs.com/xieminwyc/ai-chat
           tags: |
             type=raw,value=latest
             type=sha,prefix=
