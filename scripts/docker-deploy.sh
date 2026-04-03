@@ -37,16 +37,10 @@ fi
 log "pulling latest image..."
 docker compose -f "$COMPOSE_FILE" pull
 
-# ── 5. 执行数据库迁移（在新镜像启动前跑，确保 schema 是最新的）──
-log "running database migrations..."
-# 用临时容器执行 prisma migrate deploy，用完即删
-docker compose -f "$COMPOSE_FILE" run --rm \
-  --entrypoint "" \
-  ai-chat \
-  sh -c "npx --yes prisma migrate deploy --schema=prisma/schema.prisma" || {
-  log "migration failed, aborting deployment"
-  exit 1
-}
+# ── 5. 执行数据库迁移（可选，仅在 schema 变更时需要）──────────
+# 如需手动执行迁移，在服务器上运行：
+#   docker compose -f /root/apps/ai-chat/compose.yml run --rm --entrypoint "" \
+#     ai-chat sh -c "npx --yes prisma migrate deploy --schema=prisma/schema.prisma"
 
 # ── 6. 重启应用容器（使用新拉取的镜像）─────────────────────
 log "starting containers..."
