@@ -1,5 +1,5 @@
-# 这个 workflow 负责“自动部署到服务器”。
-# 它不直接监听 push，而是等 CI 成功后再启动。
+# 这个 workflow 负责"自动部署到服务器"。
+# 等 CI 的 build-and-push job 成功后，SSH 进服务器执行 docker compose pull/up。
 name: Deploy
 
 on:
@@ -17,8 +17,8 @@ permissions:
 
 jobs:
   deploy:
-    # 这里只允许“push 到 main 且 CI 成功”的情况触发部署。
-    # 这样 PR 检查虽然会跑 CI，但不会误发布到线上。
+    # 只允许"push 到 main 且 CI 成功"的情况触发部署。
+    # PR 跑 CI 不会触发部署，只有真正合入 main 的代码才会上线。
     if: >-
       ${{
         github.event.workflow_run.conclusion == 'success' &&
@@ -27,87 +27,22 @@ jobs:
       }}
     runs-on: ubuntu-latest
     steps:
-      # 下载触发本次 Deploy 的那次 CI 构建产物。
-      - name: Download build artifact metadata
-        uses: actions/github-script@v8
-        id: download-artifact
-        with:
-          script: |
-            const artifactName = 'next-build-artifact'
-            const runId = context.payload.workflow_run.id
-            const { data } = await github.rest.actions.listWorkflowRunArtifacts({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              run_id: runId,
-            })
-
-            const artifact = data.artifacts.find((item) => item.name === artifactName)
-
-            if (!artifact) {
-              core.setFailed(`Artifact "${artifactName}" not found for workflow run ${runId}`)
-              return
-            }
-
-            const download = await github.rest.actions.downloadArtifact({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              artifact_id: artifact.id,
-              archive_format: 'zip',
-            })
-
-            const fs = require('node:fs')
-            const path = require('node:path')
-
-            const outputDir = path.join(process.env.RUNNER_TEMP, 'deploy-artifact')
-            fs.mkdirSync(outputDir, { recursive: true })
-
-            const zipPath = path.join(outputDir, 'artifact.zip')
-            fs.writeFileSync(zipPath, Buffer.from(download.data))
-
-            core.setOutput('zip-path', zipPath)
-
-      # 解压出真正的 deploy-artifact.tgz，后面通过 scp 传到服务器。
-      - name: Unpack build artifact
-        run: |
-          unzip -o "${{ steps.download-artifact.outputs.zip-path }}" -d "${RUNNER_TEMP}/deploy-artifact/unpacked"
-          ls -lah "${RUNNER_TEMP}/deploy-artifact/unpacked"
-
       # 准备 SSH 登录服务器所需的私钥和 known_hosts。
       - name: Prepare SSH
         env:
-          # 这些值来自 GitHub Secrets，需要你在仓库设置页里手动配置。
           SERVER_HOST: ${{ secrets.SERVER_HOST }}
           SERVER_PORT: ${{ secrets.SERVER_PORT }}
           SERVER_USER: ${{ secrets.SERVER_USER }}
           SERVER_SSH_KEY: ${{ secrets.SERVER_SSH_KEY }}
         run: |
-          # 创建 ~/.ssh 目录，并限制权限。
           install -m 700 -d ~/.ssh
-          # 把 GitHub Secret 里的私钥写入临时文件，并去掉可能混入的 Windows 回车。
-          # 这里要补一个结尾换行，否则 OpenSSH 私钥可能会被识别为无效文件。
           printf '%s\n' "$SERVER_SSH_KEY" | tr -d '\r' > ~/.ssh/id_ed25519
-          # 私钥权限必须足够严格，否则 ssh 会拒绝使用。
           chmod 600 ~/.ssh/id_ed25519
-          # 先校验私钥格式，避免后面只看到模糊的 libcrypto 错误。
           ssh-keygen -lf ~/.ssh/id_ed25519
-          # 预先写入服务器指纹，避免首次连接时交互确认。
           ssh-keyscan -p "$SERVER_PORT" -H "$SERVER_HOST" >> ~/.ssh/known_hosts
 
-      # 先把 CI 生成好的 .next 构建产物上传到服务器临时目录。
-      - name: Upload build artifact to server
-        env:
-          SERVER_HOST: ${{ secrets.SERVER_HOST }}
-          SERVER_PORT: ${{ secrets.SERVER_PORT }}
-          SERVER_USER: ${{ secrets.SERVER_USER }}
-        run: |
-          scp \
-            -o ServerAliveInterval=30 \
-            -o ServerAliveCountMax=10 \
-            -P "$SERVER_PORT" \
-            "${RUNNER_TEMP}/deploy-artifact/unpacked/deploy-artifact.tgz" \
-            "$SERVER_USER@$SERVER_HOST:/tmp/ai-chat-deploy-artifact.tgz"
-
-      # 真正的部署动作：SSH 登录服务器，执行 deploy.sh，并让它直接发布 CI 构建产物。
+      # SSH 进服务器，执行 docker-deploy.sh。
+      # 脚本负责：登录 GHCR → docker compose pull → docker compose up -d → 健康检查
       - name: Deploy on server
         env:
           SERVER_HOST: ${{ secrets.SERVER_HOST }}
@@ -118,4 +53,4 @@ jobs:
             -o ServerAliveInterval=30 \
             -o ServerAliveCountMax=10 \
             -p "$SERVER_PORT" "$SERVER_USER@$SERVER_HOST" \
-            "cd /root/apps/ai-chat && git pull origin main && bash scripts/deploy.sh /tmp/ai-chat-deploy-artifact.tgz && rm -f /tmp/ai-chat-deploy-artifact.tgz"
+            "bash /root/apps/ai-chat/scripts/docker-deploy.sh"

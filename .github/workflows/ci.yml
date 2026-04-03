@@ -1,4 +1,4 @@
-# 这个 workflow 只负责“自动检查代码能不能上线”，不负责真正部署。
+# 这个 workflow 负责：代码检查 + 测试 + 构建 Docker 镜像并推送到 GHCR
 name: CI
 
 on:
@@ -18,8 +18,7 @@ jobs:
     env:
       # 标记当前运行在 CI 环境中。
       CI: true
-      # 这些是给构建和测试用的占位值，不是真实线上密钥。
-      # 目的只是让构建阶段不因为缺环境变量直接报错。
+      # 这些是给 lint/test 用的占位值，不是真实线上密钥。
       DATABASE_URL: postgresql://ci:ci@localhost:5432/ai_chat_app
       SILICONFLOW_API_KEY: test-key
       SILICONFLOW_BASE_URL: https://api.siliconflow.cn/v1
@@ -48,18 +47,51 @@ jobs:
       - name: Run tests
         run: npm run test
 
-      # 最后做一次生产构建，确认项目在真实上线模式下能编译通过。
-      - name: Build the app
-        run: npm run build
+  build-and-push:
+    # lint/test 全部通过后才构建镜像，避免推出有问题的镜像。
+    needs: verify
+    # PR 只跑 verify，只有真正 push 到 main 才构建并推送镜像。
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      # 推送镜像到 GHCR 需要写入 packages 权限。
+      packages: write
+      contents: read
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
 
-      # 把 CI 里产出的 .next 打包出来，供后续 Deploy workflow 直接发布。
-      - name: Package build artifact
-        run: tar -czf deploy-artifact.tgz .next
-
-      # 上传构建产物，Deploy workflow 会按本次 CI 的 run id 下载它。
-      - name: Upload build artifact
-        uses: actions/upload-artifact@v6
+      # 登录 GitHub Container Registry（GHCR）。
+      # GITHUB_TOKEN 是 Actions 自动提供的，不需要手动配置 Secret。
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
         with:
-          name: next-build-artifact
-          path: deploy-artifact.tgz
-          retention-days: 3
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # 生成镜像的 tag：latest + git commit sha（方便回溯）。
+      - name: Extract Docker metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/ai-chat
+          tags: |
+            type=raw,value=latest
+            type=sha,prefix=
+
+      # 开启 Docker Buildx，支持构建缓存和多平台。
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # 构建 Docker 镜像并推送到 GHCR。
+      # Dockerfile 里的占位 env 会让 build 成功；真实 env 在服务器运行时注入。
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          # 利用 GitHub Actions 缓存加速后续构建（依赖层不变时直接复用）。
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
