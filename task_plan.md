@@ -1,7 +1,7 @@
-# Task Plan: 先补齐全栈上线与排错能力
+# Task Plan: AI Chat 认证、安全与服务端能力学习设计
 
 ## Goal
-把当前 `AI Chat` 项目变成一套可重复练习的全栈训练场，先掌握本地数据库运维、部署、环境变量、日志与排错，再进入最小 AI agent。
+围绕当前 `AI Chat` 项目，先设计并落地一条“学习和项目混合”的下一阶段路线，让明天可以直接从 `认证/权限 -> 安全校验 -> Next.js 服务端能力` 开始推进。
 
 ## Current Phase
 Phase 5
@@ -9,55 +9,55 @@ Phase 5
 ## Phases
 
 ### Phase 1: Requirements & Discovery
-- [x] 确认新的主线是“部署、数据库排查、服务端日志与错误处理优先”
-- [x] 盘点当前项目的脚本、Prisma 模型、API 路由、环境变量和模型接入点
-- [x] 记录官方部署与 Prisma 生产迁移资料
+- [x] 确认用户希望“未来路线会写上，但明天先只做三块核心缺口”
+- [x] 复盘当前仓库已经具备的能力与仍然欠缺的能力
+- [x] 确认计划需要同时服务“学习理解”和“项目实施”
 - **Status:** complete
 
-### Phase 2: Planning & Structure
-- [x] 确定学习计划按“本地运维 -> 部署 -> 日志与排错 -> 最小 agent”展开
-- [x] 明确推荐的部署方案与替代方案
-- [x] 把关键排错链路映射到当前代码文件
+### Phase 2: Planning Approach
+- [x] 给出 `能力主线型 / 产品主线型 / 理论主线型` 三种组织方式
+- [x] 与用户确认最终采用“能力主线型 + 混合写法”
+- [x] 明确明天的优先级顺序不能改成别的主线
 - **Status:** complete
 
-### Phase 3: Documentation
-- [x] 新增一份可执行学习计划文档
-- [x] 在计划里写明命令、验证点、失败时先查哪里
-- [x] 把当前项目中的关键文件路径列出来
+### Phase 3: Spec Writing
+- [x] 结合当前仓库和已有账号体系设计，整理新的路线设计 spec
+- [x] 核对 Next.js 16 本地文档中的 `cookies`、Route Handler、Server/Client Components 相关说明
+- [x] 把“明天范围”和“后续路线”拆开写清楚
 - **Status:** complete
 
-### Phase 4: Review & Alignment
-- [x] 校验计划是否贴合当前仓库，而不是泛泛教程
-- [x] 校验路线是否把 agent 放到基础设施稳定之后
-- [x] 补充与官方文档一致的部署和 migration 注意事项
+### Phase 4: Review & User Sign-off
+- [x] 复核 spec 是否足够贴合当前仓库与学习目标
+- [x] 请用户先看一遍 spec 文档
+- [x] 根据用户反馈决定是否需要调整设计
 - **Status:** complete
 
-### Phase 5: Delivery
-- [x] 更新 `findings.md` 和 `progress.md`
-- [x] 向用户交付执行顺序、关键文件入口和下一步建议
-- [x] 保留后续继续推进这条主线所需的项目内记录
+### Phase 5: Implementation Plan
+- [x] 基于确认后的 spec，写详细 implementation plan
+- [x] 把明天的三个阶段拆成可直接执行的小步任务
+- [x] 给出文件路径、测试方法和学习提示
 - **Status:** complete
 
 ## Key Questions
-1. 这个项目的部署目标先选什么平台最省心？
-2. 现在遇到 400/500、数据库异常、模型异常时，应该先从哪一层开始查？
-3. 在什么条件满足后，才值得继续做 `get_time`、`web_search` 和 `AgentRun / ToolCall`？
+1. 如何让计划既适合明天直接开工，又不会变成只看不做的学习清单？
+2. 第一阶段应该优先做完整账号体系，还是先做最小认证基础？
+3. 如何把 Next.js 服务端能力写成“真正在当前仓库能落地”的内容？
 
 ## Decisions Made
 | Decision | Rationale |
 |----------|-----------|
-| 学习顺序改为“本地运维 -> 部署 -> 日志与排错 -> 最小 agent” | 先把系统跑稳，比继续堆 agent 功能更有复利 |
-| 推荐先用 Vercel 部署当前 Next.js 项目 | 对当前技术栈最顺手，环境变量、部署和日志路径最短 |
-| 线上数据库迁移明确使用 `prisma migrate deploy`，不把 `migrate dev` 带到生产 | 避免把本地开发习惯误带到线上 |
-| 保留项目内持久规划文件，而不是只在对话里给清单 | 后续我们可以继续沿着这条主线推进，不会丢上下文 |
+| 计划采用“能力主线型 + 学习/项目混合写法” | 最贴合用户当前“边做边懂”的目标 |
+| 明天只聚焦 `认证/权限 -> 安全校验 -> Next.js 服务端能力` | 这是当前仓库最真实、最值钱的能力缺口 |
+| 把已有完整账号体系设计视为后续方向，而不是明天一次做完 | 避免第一阶段范围失控 |
+| 先核对本地 Next.js 16 文档再写服务端能力设计 | 避免按旧版本印象给出不准的路线 |
 
 ## Errors Encountered
 | Error | Attempt | Resolution |
 |-------|---------|------------|
-| `git log -5 --oneline` 报当前分支还没有 commit | 1 | 记录为项目现状，不影响生成执行单 |
-| `planning-with-files` 的 superpowers 路径不存在 | 1 | 使用普通版 `planning-with-files` 说明继续执行 |
+| `planning-with-files` 的 session catchup 暂不支持原生 Codex session 解析 | 1 | 继续使用现有 `task_plan.md/findings.md/progress.md` 手动维护 |
+| 初次读取 Next.js docs 的路径猜错 | 1 | 改为实际存在的 `node_modules/next/dist/docs/01-app/...` 路径 |
 
 ## Notes
-- 当前仓库最关键的链路是：前端聊天页面 -> `src/app/api/chat/route.ts` -> `src/lib/prisma.ts` / `src/lib/chat.ts` -> PostgreSQL / SiliconFlow
-- 当前 `.env.local` 已包含 `DATABASE_URL`、`SILICONFLOW_API_KEY`、`SILICONFLOW_BASE_URL`、`SILICONFLOW_MODEL`
-- 当前 `package.json` 只有 `dev/build/start/lint/test`，后续真实部署时要复核 Prisma Client 生成流程
+- 当前下一步不是写实现代码，而是先把 spec 写清楚并交给用户确认
+- 当前新 spec 文档应与 `docs/superpowers/specs/2026-04-02-auth-and-guest-trial-design.md` 形成“长期产品方向 + 明日学习切入路线”的配合关系
+- 计划文档已写入 `docs/superpowers/plans/2026-04-08-auth-security-server-implementation.md`

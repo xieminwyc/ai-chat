@@ -91,3 +91,59 @@
 | What's the goal? | 先补齐全栈上线与排错能力，再进 AI agent |
 | What have I learned? | 当前项目已经具备练部署、数据库、日志与排错的完整链路 |
 | What have I done? | 已完成项目调研，并写好可执行学习计划文档 |
+
+## Session: 2026-04-08
+
+### Phase 1: Requirements & Discovery
+- **Status:** complete
+- **Started:** 2026-04-08
+- Actions taken:
+  - 读取 `brainstorming`、`writing-plans`、`planning-with-files` 技能说明
+  - 重新确认用户目标是“未来路线也写上，但明天先只做三块核心缺口”
+  - 回看现有项目笔记和账号体系设计，确定这次不是重写产品大 spec，而是写学习切入路线
+- Files created/modified:
+  - `task_plan.md` (updated)
+  - `findings.md` (updated)
+  - `progress.md` (updated)
+
+### Phase 2: Planning Approach
+- **Status:** complete
+- Actions taken:
+  - 给出 `能力主线型 / 产品主线型 / 理论主线型` 三种组织方式
+  - 与用户确认采用“能力主线型 + 学习/项目混合写法”
+  - 固定明天的主线为 `认证/权限 -> 安全校验 -> Next.js 服务端能力`
+- Files created/modified:
+  - `task_plan.md` (updated)
+
+### Phase 3: Spec Writing
+- **Status:** complete
+- Actions taken:
+  - 读取本地 Next.js 16 文档中的 `cookies`、Route Handler、Server/Client Components、Fetching Data、Authentication 指南
+  - 整理“明天开工范围”和“后续 1 到 2 个月路线”的边界
+  - 新增学习与实施路线设计 spec 文档
+- Files created/modified:
+  - `docs/superpowers/specs/2026-04-08-auth-security-server-learning-design.md` (created)
+  - `task_plan.md` (updated)
+  - `findings.md` (updated)
+
+### Phase 4: Review & User Sign-off
+- **Status:** in_progress
+- Actions taken:
+  - 对新 spec 做了一轮本地自查，重点确认“明天三阶段范围是否收口”“是否仍贴合当前仓库”
+  - 用户确认认可 spec，并同意继续写 implementation plan
+- Files created/modified:
+  - `task_plan.md` (updated)
+  - `progress.md` (updated)
+
+### Phase 5: Implementation Plan
+- **Status:** complete
+- Actions taken:
+  - 读取现有实现计划文档格式，沿用同一套 plan header 和 task 结构
+  - 重新盘点 `schema`、`chat route`、`chat service/repository`、`page.tsx`、`chat-app.tsx` 和现有测试文件
+  - 新增正式 implementation plan，明确 Day 1 到 Day 3 的主线和每步验证命令
+  - 明确第一轮实现只覆盖正式用户认证，不把 `GuestSession` 混入第一天
+- Files created/modified:
+  - `docs/superpowers/plans/2026-04-08-auth-security-server-implementation.md` (created)
+  - `task_plan.md` (updated)
+  - `findings.md` (updated)
+  - `progress.md` (updated)
