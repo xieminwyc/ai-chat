@@ -5,8 +5,8 @@ const { prisma } = vi.hoisted(() => ({
     chat: {
       create: vi.fn(),
       delete: vi.fn(),
+      findFirst: vi.fn(),
       findMany: vi.fn(),
-      findUnique: vi.fn(),
       update: vi.fn(),
     },
     message: {
@@ -38,9 +38,10 @@ describe("chat-repository", () => {
   it("loads chats for the sidebar ordered by updatedAt descending", async () => {
     prisma.chat.findMany.mockResolvedValue([]);
 
-    await listChats();
+    await listChats("user_1");
 
     expect(prisma.chat.findMany).toHaveBeenCalledWith({
+      where: { userId: "user_1" },
       orderBy: { updatedAt: "desc" },
       select: {
         id: true,
@@ -54,10 +55,13 @@ describe("chat-repository", () => {
   it("loads conversation messages in chronological order for the model", async () => {
     prisma.message.findMany.mockResolvedValue([]);
 
-    await getConversationMessages("chat_1");
+    await getConversationMessages("chat_1", "user_1");
 
     expect(prisma.message.findMany).toHaveBeenCalledWith({
-      where: { chatId: "chat_1" },
+      where: {
+        chatId: "chat_1",
+        chat: { userId: "user_1" },
+      },
       orderBy: { createdAt: "asc" },
       select: {
         role: true,
@@ -88,8 +92,16 @@ describe("chat-repository", () => {
   });
 
   it("provides helpers for direct chat and message persistence", async () => {
-    prisma.chat.findUnique.mockResolvedValue({ id: "chat_1", title: "旧标题" });
-    prisma.chat.create.mockResolvedValue({ id: "chat_new", title: "测试标题" });
+    prisma.chat.findFirst.mockResolvedValue({
+      id: "chat_1",
+      title: "旧标题",
+      userId: "user_1",
+    });
+    prisma.chat.create.mockResolvedValue({
+      id: "chat_new",
+      title: "测试标题",
+      userId: "user_1",
+    });
     prisma.message.findMany.mockResolvedValue([
       {
         id: "message_1",
@@ -100,31 +112,39 @@ describe("chat-repository", () => {
     ]);
     prisma.message.create.mockResolvedValue({});
 
-    await getChatById("chat_1");
-    await createChat("测试标题");
-    await getChatMessages("chat_1");
+    await getChatById("chat_1", "user_1");
+    await createChat("测试标题", "user_1");
+    await getChatMessages("chat_1", "user_1");
     await createMessage({
       chatId: "chat_1",
       role: "assistant",
       content: "你好",
     });
 
-    expect(prisma.chat.findUnique).toHaveBeenCalledWith({
-      where: { id: "chat_1" },
+    expect(prisma.chat.findFirst).toHaveBeenCalledWith({
+      where: {
+        id: "chat_1",
+        userId: "user_1",
+      },
       select: {
         id: true,
         title: true,
+        userId: true,
       },
     });
     expect(prisma.chat.create).toHaveBeenCalledWith({
-      data: { title: "测试标题" },
+      data: { title: "测试标题", userId: "user_1" },
       select: {
         id: true,
         title: true,
+        userId: true,
       },
     });
     expect(prisma.message.findMany).toHaveBeenCalledWith({
-      where: { chatId: "chat_1" },
+      where: {
+        chatId: "chat_1",
+        chat: { userId: "user_1" },
+      },
       orderBy: { createdAt: "asc" },
       select: {
         id: true,

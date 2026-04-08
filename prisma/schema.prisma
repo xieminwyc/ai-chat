@@ -6,16 +6,41 @@ datasource db {
   provider = "postgresql"
 }
 
+model User {
+  id           String    @id @default(cuid())
+  email        String    @unique
+  passwordHash String
+  createdAt    DateTime  @default(now()) @db.Timestamptz(3)
+  updatedAt    DateTime  @default(now()) @db.Timestamptz(3)
+  sessions     Session[]
+  chats        Chat[]
+}
+
+model Session {
+  id        String   @id @default(cuid())
+  token     String   @unique
+  userId    String
+  expiresAt DateTime @db.Timestamptz(3)
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
 // Chat 表表示“一个聊天会话”。
 // 一次新建聊天，最终会对应这里的一条记录。
 model Chat {
   id        String    @id @default(cuid())
+  userId    String
   title     String
   createdAt DateTime  @default(now()) @db.Timestamptz(3)
   // updatedAt 由数据库 trigger 维护，用来表达“这条会话最近一次被激活是什么时候”。
   updatedAt DateTime  @default(now()) @db.Timestamptz(3)
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
   // 这里不是数据库里真的一列，而是 Prisma 用来表达“一条 Chat 有很多 Message”的关系字段。
   messages  Message[]
+
+  @@index([userId, updatedAt])
 }
 
 // Message 表表示“聊天里的每一条消息”。

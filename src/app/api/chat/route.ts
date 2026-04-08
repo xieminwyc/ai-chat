@@ -1,7 +1,13 @@
 import { NextResponse } from "next/server";
+import { ZodError } from "zod";
 
+import { getCurrentSession } from "@/server/auth/auth-service";
+import { readSessionTokenFromCookieHeader } from "@/server/auth/session";
+import { requireAuthenticatedUser } from "@/server/chat/chat-auth";
+import { ForbiddenError, UnauthorizedError } from "@/server/chat/chat-errors";
 import { createStreamingChatResponse } from "@/server/chat/chat-stream";
 import { getDurationMs, logError, logInfo } from "@/server/chat/chat-logger";
+import { chatQuerySchema, postChatSchema, renameChatSchema } from "@/server/chat/chat-schemas";
 import {
   deleteChatById,
   listChatSummaries,
@@ -12,17 +18,52 @@ import {
 
 export const runtime = "nodejs";
 
+async function getAuthenticatedUserFromRequest(request: Request) {
+  const sessionToken = readSessionTokenFromCookieHeader(
+    request.headers.get("cookie"),
+  );
+  const session = await getCurrentSession(sessionToken);
+  return requireAuthenticatedUser(session?.user ?? null);
+}
+
+function toRouteErrorResponse(
+  error: unknown,
+  fallbackMessage: string,
+) {
+  if (error instanceof ZodError) {
+    return NextResponse.json({ error: "Invalid request payload" }, { status: 400 });
+  }
+
+  if (error instanceof UnauthorizedError) {
+    return NextResponse.json({ error: error.message }, { status: 401 });
+  }
+
+  if (error instanceof ForbiddenError) {
+    return NextResponse.json({ error: error.message }, { status: 403 });
+  }
+
+  return NextResponse.json(
+    {
+      error: error instanceof Error ? error.message : fallbackMessage,
+    },
+    { status: 500 },
+  );
+}
+
 export async function GET(request: Request) {
   const startedAt = Date.now();
 
   try {
+    const currentUser = await getAuthenticatedUserFromRequest(request);
     const { searchParams } = new URL(request.url);
-    const chatId = searchParams.get("chatId");
+    const { chatId } = chatQuerySchema.parse({
+      chatId: searchParams.get("chatId") ?? undefined,
+    });
 
     if (!chatId) {
       logInfo("get.list.start");
 
-      const chats = await listChatSummaries();
+      const chats = await listChatSummaries(currentUser.id);
 
       logInfo("get.list.success", {
         chatCount: chats.length,
@@ -34,7 +75,7 @@ export async function GET(request: Request) {
 
     logInfo("get.messages.start", { chatId });
 
-    const messages = await loadChatMessages(chatId);
+    const messages = await loadChatMessages(currentUser.id, chatId);
 
     logInfo("get.messages.success", {
       chatId,
@@ -48,13 +89,7 @@ export async function GET(request: Request) {
       durationMs: getDurationMs(startedAt),
     });
 
-    return NextResponse.json(
-      {
-        error:
-          error instanceof Error ? error.message : "Chat history route failed",
-      },
-      { status: 500 },
-    );
+    return toRouteErrorResponse(error, "Chat history route failed");
   }
 }
 
@@ -62,8 +97,11 @@ export async function DELETE(request: Request) {
   const startedAt = Date.now();
 
   try {
+    const currentUser = await getAuthenticatedUserFromRequest(request);
     const { searchParams } = new URL(request.url);
-    const chatId = searchParams.get("chatId");
+    const { chatId } = chatQuerySchema.parse({
+      chatId: searchParams.get("chatId") ?? undefined,
+    });
 
     if (!chatId) {
       return NextResponse.json(
@@ -74,7 +112,7 @@ export async function DELETE(request: Request) {
 
     logInfo("delete.start", { chatId });
 
-    await deleteChatById(chatId);
+    await deleteChatById(currentUser.id, chatId);
 
     logInfo("delete.success", {
       chatId,
@@ -90,13 +128,7 @@ export async function DELETE(request: Request) {
       durationMs: getDurationMs(startedAt),
     });
 
-    return NextResponse.json(
-      {
-        error:
-          error instanceof Error ? error.message : "Delete chat route failed",
-      },
-      { status: 500 },
-    );
+    return toRouteErrorResponse(error, "Delete chat route failed");
   }
 }
 
@@ -104,12 +136,12 @@ export async function PATCH(request: Request) {
   const startedAt = Date.now();
 
   try {
+    const currentUser = await getAuthenticatedUserFromRequest(request);
     const { searchParams } = new URL(request.url);
-    const chatId = searchParams.get("chatId");
-    const body = (await request.json()) as {
-      title?: string;
-    };
-    const title = body.title?.trim();
+    const { chatId } = chatQuerySchema.parse({
+      chatId: searchParams.get("chatId") ?? undefined,
+    });
+    const { title } = renameChatSchema.parse(await request.json());
 
     if (!chatId) {
       return NextResponse.json(
@@ -118,16 +150,12 @@ export async function PATCH(request: Request) {
       );
     }
 
-    if (!title) {
-      return NextResponse.json({ error: "title is required" }, { status: 400 });
-    }
-
     logInfo("patch.start", {
       chatId,
       titleLength: title.length,
     });
 
-    const chat = await renameChat(chatId, title);
+    const chat = await renameChat(currentUser.id, chatId, title);
 
     logInfo("patch.success", {
       chatId,
@@ -143,13 +171,7 @@ export async function PATCH(request: Request) {
       durationMs: getDurationMs(startedAt),
     });
 
-    return NextResponse.json(
-      {
-        error:
-          error instanceof Error ? error.message : "Rename chat route failed",
-      },
-      { status: 500 },
-    );
+    return toRouteErrorResponse(error, "Rename chat route failed");
   }
 }
 
@@ -157,26 +179,19 @@ export async function POST(request: Request) {
   const startedAt = Date.now();
 
   try {
-    const body = (await request.json()) as {
-      chatId?: string;
-      message?: string;
-    };
-    const message = body.message?.trim();
-
-    if (!message) {
-      return NextResponse.json(
-        { error: "message is required" },
-        { status: 400 },
-      );
-    }
+    const currentUser = await getAuthenticatedUserFromRequest(request);
+    const { chatId: requestedChatId, message } = postChatSchema.parse(
+      await request.json(),
+    );
 
     logInfo("post.start", {
-      chatId: body.chatId ?? null,
+      chatId: requestedChatId ?? null,
       messageLength: message.length,
     });
 
     const { chatId, isNewChat, replyStream } = await prepareChatReply({
-      chatId: body.chatId,
+      userId: currentUser.id,
+      chatId: requestedChatId,
       message,
     });
 
@@ -195,11 +210,6 @@ export async function POST(request: Request) {
       durationMs: getDurationMs(startedAt),
     });
 
-    return NextResponse.json(
-      {
-        error: error instanceof Error ? error.message : "Chat route failed",
-      },
-      { status: 500 },
-    );
+    return toRouteErrorResponse(error, "Chat route failed");
   }
 }

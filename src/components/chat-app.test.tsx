@@ -4,6 +4,25 @@ import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ChatApp } from "@/components/chat-app";
+import type { HomePageData } from "@/server/page/home-data";
+
+function createInitialData(
+  overrides: Partial<HomePageData> = {},
+): HomePageData {
+  return {
+    isAuthenticated: true,
+    currentUser: {
+      id: "user_1",
+      email: "alice@example.com",
+      createdAt: "2026-04-08T01:00:00.000Z",
+      updatedAt: "2026-04-08T01:00:00.000Z",
+    },
+    initialChats: [],
+    initialMessages: [],
+    initialChatId: null,
+    ...overrides,
+  };
+}
 
 describe("ChatApp", () => {
   beforeEach(() => {
@@ -12,43 +31,116 @@ describe("ChatApp", () => {
     window.history.replaceState(null, "", "/");
   });
 
-  it("renders the premium empty state on first load", async () => {
-    vi.spyOn(global, "fetch").mockResolvedValue({
-      ok: true,
-      json: async () => ({
-        chats: [],
-      }),
-    } as Response);
+  it("renders the premium empty state from server-provided bootstrap data", () => {
+    const fetchSpy = vi.spyOn(global, "fetch");
 
-    render(<ChatApp />);
+    render(<ChatApp initialData={createInitialData()} />);
 
-    expect(
-      (await screen.findAllByText("A more beautiful place to think")).length,
-    ).toBeGreaterThan(0);
+    expect(screen.getByText("A more beautiful place to think")).toBeInTheDocument();
     expect(
       screen.getByText("把灵感、问题和暂时说不清的想法，都放进这里慢慢整理。"),
     ).toBeInTheDocument();
+    expect(fetchSpy).not.toHaveBeenCalled();
   });
 
-  it("shows the refreshed empty chat history guidance", async () => {
+  it("shows the signed-out auth shell and blocks message input", () => {
+    render(
+      <ChatApp
+        initialData={createInitialData({
+          isAuthenticated: false,
+          currentUser: null,
+        })}
+      />,
+    );
+
+    expect(
+      screen.getByText("先登录，再开始真正的服务端聊天流程"),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "发送" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "登录" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "注册" })).toBeInTheDocument();
+  });
+
+  it("submits the register form and shows success feedback", async () => {
+    const user = userEvent.setup();
+
     vi.spyOn(global, "fetch").mockResolvedValue({
       ok: true,
       json: async () => ({
-        chats: [],
+        user: {
+          id: "user_2",
+          email: "new@example.com",
+        },
       }),
     } as Response);
 
-    render(<ChatApp />);
+    render(
+      <ChatApp
+        initialData={createInitialData({
+          isAuthenticated: false,
+          currentUser: null,
+        })}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "注册" }));
+    await user.type(screen.getByLabelText("邮箱"), "new@example.com");
+    await user.type(screen.getByLabelText("密码"), "password123");
+    await user.click(screen.getByRole("button", { name: "注册账号" }));
+
+    expect(global.fetch).toHaveBeenCalledWith("/api/auth/register", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        email: "new@example.com",
+        password: "password123",
+      }),
+    });
+    expect(
+      await screen.findByText("注册成功，现在可以直接登录了。"),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "登录" })).toHaveClass(
+      "bg-slate-900",
+    );
+    expect(screen.getByLabelText("邮箱")).toHaveValue("new@example.com");
+    expect(screen.getByLabelText("密码")).toHaveValue("");
+  });
+
+  it("shows a clear Chinese hint when login fails", async () => {
+    const user = userEvent.setup();
+
+    vi.spyOn(global, "fetch").mockResolvedValue({
+      ok: false,
+      json: async () => ({
+        error: "Invalid email or password",
+      }),
+    } as Response);
+
+    render(
+      <ChatApp
+        initialData={createInitialData({
+          isAuthenticated: false,
+          currentUser: null,
+        })}
+      />,
+    );
+
+    await user.type(screen.getByLabelText("邮箱"), "alice@example.com");
+    await user.type(screen.getByLabelText("密码"), "wrong-password");
+    await user.click(screen.getByRole("button", { name: "登录并刷新页面" }));
 
     expect(
       await screen.findByText(
-        "还没有历史对话。发出第一条消息后，这里会开始记录你的思路轨迹。",
+        "邮箱或密码不正确。如果你还没注册，可以先切到“注册”创建账号。",
       ),
     ).toBeInTheDocument();
+    expect(screen.getByLabelText("邮箱")).toHaveAttribute("aria-invalid", "true");
+    expect(screen.getByLabelText("密码")).toHaveAttribute("aria-invalid", "true");
   });
 
-  it("auto-scrolls the message viewport when history is loaded", async () => {
-    window.localStorage.setItem("activeChatId", "chat_1");
+  it("auto-scrolls the message viewport when initial history is provided", async () => {
     const scrollTo = vi.fn();
 
     Object.defineProperty(HTMLElement.prototype, "scrollTo", {
@@ -63,39 +155,28 @@ describe("ChatApp", () => {
       },
     });
 
-    vi.spyOn(global, "fetch").mockImplementation((input) => {
-      const url = String(input);
-
-      if (url === "/api/chat") {
-        return Promise.resolve({
-          ok: true,
-          json: async () => ({
-            chats: [{ id: "chat_1", title: "之前的会话" }],
-          }),
-        } as Response);
-      }
-
-      return Promise.resolve({
-        ok: true,
-        json: async () => ({
-          chatId: "chat_1",
-          messages: [
+    render(
+      <ChatApp
+        initialData={createInitialData({
+          initialChats: [{ id: "chat_1", title: "之前的会话" }],
+          initialMessages: [
             {
               id: "message_1",
               role: "user",
               content: "之前的问题",
+              createdAt: "2026-03-24T11:20:51.268Z",
             },
             {
               id: "message_2",
               role: "assistant",
               content: "之前的回复",
+              createdAt: "2026-03-24T11:20:52.268Z",
             },
           ],
-        }),
-      } as Response);
-    });
-
-    render(<ChatApp />);
+          initialChatId: "chat_1",
+        })}
+      />,
+    );
 
     expect(await screen.findByText("之前的回复")).toBeInTheDocument();
     expect(scrollTo).toHaveBeenCalledWith({
@@ -104,14 +185,74 @@ describe("ChatApp", () => {
     });
   });
 
+  it("restores a saved active chat from localStorage without refetching the chat list", async () => {
+    window.localStorage.setItem("activeChatId", "chat_1");
+
+    vi.spyOn(global, "fetch").mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        chatId: "chat_1",
+        messages: [
+          {
+            id: "message_1",
+            role: "user",
+            content: "之前的问题",
+          },
+          {
+            id: "message_2",
+            role: "assistant",
+            content: "之前的回复",
+          },
+        ],
+      }),
+    } as Response);
+
+    render(
+      <ChatApp
+        initialData={createInitialData({
+          initialChats: [{ id: "chat_1", title: "之前的会话" }],
+        })}
+      />,
+    );
+
+    expect(await screen.findByText("之前的问题")).toBeInTheDocument();
+    expect(global.fetch).toHaveBeenCalledWith("/api/chat?chatId=chat_1");
+  });
+
+  it("syncs the server-selected chat id into localStorage on first render", async () => {
+    window.localStorage.setItem("activeChatId", "chat_old");
+
+    render(
+      <ChatApp
+        initialData={createInitialData({
+          initialChats: [{ id: "chat_1", title: "首屏会话" }],
+          initialMessages: [
+            {
+              id: "message_1",
+              role: "assistant",
+              content: "服务端已经带下来的首屏消息",
+              createdAt: "2026-03-24T11:20:52.268Z",
+            },
+          ],
+          initialChatId: "chat_1",
+        })}
+      />,
+    );
+
+    expect(await screen.findByText("服务端已经带下来的首屏消息")).toBeInTheDocument();
+    expect(window.localStorage.getItem("activeChatId")).toBe("chat_1");
+  });
+
   it("submits a message and renders the streamed assistant reply", async () => {
     const user = userEvent.setup();
     let chatListRequestCount = 0;
+    let postBody: string | null = null;
 
     vi.spyOn(global, "fetch").mockImplementation((input, init) => {
       const url = String(input);
 
       if (url === "/api/chat" && init?.method === "POST") {
+        postBody = String(init.body ?? "");
         const stream = new ReadableStream({
           start(controller) {
             controller.enqueue(
@@ -139,16 +280,13 @@ describe("ChatApp", () => {
         return Promise.resolve({
           ok: true,
           json: async () => ({
-            chats:
-              chatListRequestCount === 1
-                ? []
-                : [
-                    {
-                      id: "chat_1",
-                      title: "新会话",
-                      updatedAt: "2026-03-25T03:06:31.474Z",
-                    },
-                  ],
+            chats: [
+              {
+                id: "chat_1",
+                title: "新会话",
+                updatedAt: "2026-03-25T03:06:31.474Z",
+              },
+            ],
           }),
         } as Response);
       }
@@ -156,7 +294,7 @@ describe("ChatApp", () => {
       throw new Error(`unexpected fetch: ${url}`);
     });
 
-    render(<ChatApp />);
+    render(<ChatApp initialData={createInitialData()} />);
 
     await user.type(screen.getByLabelText("请输入消息"), "测试消息");
     await user.click(screen.getByRole("button", { name: "发送" }));
@@ -166,7 +304,8 @@ describe("ChatApp", () => {
       await screen.findByText("可以先从 Next.js 的页面、布局和接口路由开始学起。"),
     ).toBeInTheDocument();
     expect(window.localStorage.getItem("activeChatId")).toBe("chat_1");
-    expect(chatListRequestCount).toBe(2);
+    expect(chatListRequestCount).toBe(1);
+    expect(postBody).toBe(JSON.stringify({ message: "测试消息" }));
   });
 
   it("renders the backend error message when the request fails", async () => {
@@ -179,7 +318,7 @@ describe("ChatApp", () => {
       }),
     } as Response);
 
-    render(<ChatApp />);
+    render(<ChatApp initialData={createInitialData()} />);
 
     await user.type(screen.getByLabelText("请输入消息"), "测试消息");
     await user.click(screen.getByRole("button", { name: "发送" }));
@@ -187,106 +326,11 @@ describe("ChatApp", () => {
     expect(await screen.findByText("数据库暂时不可用")).toBeInTheDocument();
   });
 
-  it("loads message history when an active chat id exists", async () => {
-    window.localStorage.setItem("activeChatId", "chat_1");
-
-    vi.spyOn(global, "fetch").mockImplementation((input) => {
-      const url = String(input);
-
-      if (url === "/api/chat") {
-        return Promise.resolve({
-          ok: true,
-          json: async () => ({
-            chats: [
-              {
-                id: "chat_1",
-                title: "之前的会话",
-              },
-            ],
-          }),
-        } as Response);
-      }
-
-      return Promise.resolve({
-        ok: true,
-        json: async () => ({
-          chatId: "chat_1",
-          messages: [
-            {
-              id: "message_1",
-              role: "user",
-              content: "之前的问题",
-            },
-            {
-              id: "message_2",
-              role: "assistant",
-              content: "之前的回复",
-            },
-          ],
-        }),
-      } as Response);
-    });
-
-    render(<ChatApp />);
-
-    expect(await screen.findByText("之前的问题")).toBeInTheDocument();
-    expect(await screen.findByText("之前的回复")).toBeInTheDocument();
-    expect((await screen.findAllByText("之前的会话")).length).toBeGreaterThan(0);
-  });
-
-  it("prefers chatId from the url when opening the page", async () => {
-    window.history.pushState(null, "", "/?chatId=chat_2");
-
-    vi.spyOn(global, "fetch").mockImplementation((input) => {
-      const url = String(input);
-
-      if (url === "/api/chat") {
-        return Promise.resolve({
-          ok: true,
-          json: async () => ({
-            chats: [{ id: "chat_2", title: "URL 会话" }],
-          }),
-        } as Response);
-      }
-
-      return Promise.resolve({
-        ok: true,
-        json: async () => ({
-          chatId: "chat_2",
-          messages: [
-            {
-              id: "message_1",
-              role: "assistant",
-              content: "我是从 URL 打开的会话",
-            },
-          ],
-        }),
-      } as Response);
-    });
-
-    render(<ChatApp />);
-
-    expect(await screen.findByText("我是从 URL 打开的会话")).toBeInTheDocument();
-    expect(window.localStorage.getItem("activeChatId")).toBe("chat_2");
-  });
-
-  it("loads chat list and switches to the clicked conversation", async () => {
+  it("loads the clicked conversation from the server", async () => {
     const user = userEvent.setup();
 
     vi.spyOn(global, "fetch").mockImplementation((input) => {
       const url = String(input);
-
-      if (url === "/api/chat") {
-        return Promise.resolve({
-          ok: true,
-          json: async () => ({
-            chats: [
-              { id: "chat_1", title: "Next.js 学习" },
-              { id: "chat_2", title: "数据库复盘" },
-            ],
-          }),
-        } as Response);
-      }
 
       if (url === "/api/chat?chatId=chat_2") {
         return Promise.resolve({
@@ -304,44 +348,46 @@ describe("ChatApp", () => {
         } as Response);
       }
 
-      return Promise.resolve({
-        ok: true,
-        json: async () => ({
-          chatId: "chat_1",
-          messages: [],
-        }),
-      } as Response);
+      throw new Error(`unexpected fetch: ${url}`);
     });
 
-    render(<ChatApp />);
+    render(
+      <ChatApp
+        initialData={createInitialData({
+          initialChats: [
+            { id: "chat_1", title: "Next.js 学习" },
+            { id: "chat_2", title: "数据库复盘" },
+          ],
+        })}
+      />,
+    );
 
-    await user.click(await screen.findByRole("button", { name: "数据库复盘" }));
+    await user.click(screen.getByRole("button", { name: "数据库复盘" }));
 
     expect(await screen.findByText("数据库要先学什么")).toBeInTheDocument();
     expect(window.localStorage.getItem("activeChatId")).toBe("chat_2");
     expect(window.location.search).toBe("?chatId=chat_2");
   });
 
-  it("keeps the chat order returned by the backend", async () => {
-    vi.spyOn(global, "fetch").mockResolvedValue({
-      ok: true,
-      json: async () => ({
-        chats: [
-          {
-            id: "chat_older",
-            title: "后端给的第一项",
-            updatedAt: "2026-03-24T10:00:00.000Z",
-          },
-          {
-            id: "chat_newer",
-            title: "后端给的第二项",
-            updatedAt: "2026-03-25T10:00:00.000Z",
-          },
-        ],
-      }),
-    } as Response);
-
-    render(<ChatApp />);
+  it("keeps the chat order returned by the backend bootstrap", async () => {
+    render(
+      <ChatApp
+        initialData={createInitialData({
+          initialChats: [
+            {
+              id: "chat_older",
+              title: "后端给的第一项",
+              updatedAt: "2026-03-24T10:00:00.000Z",
+            },
+            {
+              id: "chat_newer",
+              title: "后端给的第二项",
+              updatedAt: "2026-03-25T10:00:00.000Z",
+            },
+          ],
+        })}
+      />,
+    );
 
     expect(await screen.findByText("后端给的第一项")).toBeInTheDocument();
     expect(screen.getByText("后端给的第二项")).toBeInTheDocument();
@@ -360,29 +406,25 @@ describe("ChatApp", () => {
           ? "后端给的第一项"
           : "后端给的第二项",
       ),
-    ).toEqual([
-      "后端给的第一项",
-      "后端给的第二项",
-    ]);
+    ).toEqual(["后端给的第一项", "后端给的第二项"]);
   });
 
   it("shows a formatted updated time for each chat", async () => {
     const updatedAt = "2026-03-25T03:06:31.474Z";
 
-    vi.spyOn(global, "fetch").mockResolvedValue({
-      ok: true,
-      json: async () => ({
-        chats: [
-          {
-            id: "chat_1",
-            title: "带时间的会话",
-            updatedAt,
-          },
-        ],
-      }),
-    } as Response);
-
-    render(<ChatApp />);
+    render(
+      <ChatApp
+        initialData={createInitialData({
+          initialChats: [
+            {
+              id: "chat_1",
+              title: "带时间的会话",
+              updatedAt,
+            },
+          ],
+        })}
+      />,
+    );
 
     expect(await screen.findByText("带时间的会话")).toBeInTheDocument();
     expect(
@@ -394,34 +436,23 @@ describe("ChatApp", () => {
     const user = userEvent.setup();
     window.localStorage.setItem("activeChatId", "chat_1");
 
-    vi.spyOn(global, "fetch").mockImplementation((input) => {
-      const url = String(input);
-
-      if (url === "/api/chat") {
-        return Promise.resolve({
-          ok: true,
-          json: async () => ({
-            chats: [{ id: "chat_1", title: "旧会话" }],
-          }),
-        } as Response);
-      }
-
-      return Promise.resolve({
-        ok: true,
-        json: async () => ({
-          chatId: "chat_1",
-          messages: [
+    render(
+      <ChatApp
+        initialData={createInitialData({
+          initialChats: [{ id: "chat_1", title: "旧会话" }],
+          initialMessages: [
             {
               id: "message_1",
               role: "user",
               content: "旧消息",
+              createdAt: "2026-03-24T11:20:51.268Z",
             },
           ],
-        }),
-      } as Response);
-    });
+          initialChatId: "chat_1",
+        })}
+      />,
+    );
 
-    render(<ChatApp />);
     expect(await screen.findByText("旧消息")).toBeInTheDocument();
 
     await user.click(screen.getAllByRole("button", { name: "新建聊天" })[0]);
@@ -435,52 +466,30 @@ describe("ChatApp", () => {
     const user = userEvent.setup();
     window.localStorage.setItem("activeChatId", "chat_1");
 
-    vi.spyOn(global, "fetch").mockImplementation((input, init) => {
-      const url = String(input);
+    vi.spyOn(global, "fetch").mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        success: true,
+      }),
+    } as Response);
 
-      if (url === "/api/chat") {
-        return Promise.resolve({
-          ok: true,
-          json: async () => ({
-            chats: [{ id: "chat_1", title: "要删除的会话" }],
-          }),
-        } as Response);
-      }
+    render(
+      <ChatApp
+        initialData={createInitialData({
+          initialChats: [{ id: "chat_1", title: "要删除的会话" }],
+          initialMessages: [
+            {
+              id: "message_1",
+              role: "user",
+              content: "旧消息",
+              createdAt: "2026-03-24T11:20:51.268Z",
+            },
+          ],
+          initialChatId: "chat_1",
+        })}
+      />,
+    );
 
-      if (url === "/api/chat?chatId=chat_1" && !init?.method) {
-        return Promise.resolve({
-          ok: true,
-          json: async () => ({
-            chatId: "chat_1",
-            messages: [
-              {
-                id: "message_1",
-                role: "user",
-                content: "旧消息",
-              },
-            ],
-          }),
-        } as Response);
-      }
-
-      if (url === "/api/chat?chatId=chat_1" && init?.method === "DELETE") {
-        return Promise.resolve({
-          ok: true,
-          json: async () => ({
-            success: true,
-          }),
-        } as Response);
-      }
-
-      return Promise.resolve({
-        ok: true,
-        json: async () => ({
-          chats: [],
-        }),
-      } as Response);
-    });
-
-    render(<ChatApp />);
     expect(await screen.findByText("旧消息")).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "删除当前会话" }));
@@ -491,43 +500,12 @@ describe("ChatApp", () => {
     expect(window.location.search).toBe("");
   });
 
-  it("renames the active chat title", async () => {
+  it("renames the active chat title and refreshes the sidebar list", async () => {
     const user = userEvent.setup();
-    window.localStorage.setItem("activeChatId", "chat_1");
     let chatListRequestCount = 0;
 
     vi.spyOn(global, "fetch").mockImplementation((input, init) => {
       const url = String(input);
-
-      if (url === "/api/chat") {
-        chatListRequestCount += 1;
-
-        return Promise.resolve({
-          ok: true,
-          json: async () => ({
-            chats:
-              chatListRequestCount === 1
-                ? [
-                    { id: "chat_2", title: "另一个会话" },
-                    { id: "chat_1", title: "旧标题" },
-                  ]
-                : [
-                    { id: "chat_1", title: "新的标题" },
-                    { id: "chat_2", title: "另一个会话" },
-                  ],
-          }),
-        } as Response);
-      }
-
-      if (url === "/api/chat?chatId=chat_1" && !init?.method) {
-        return Promise.resolve({
-          ok: true,
-          json: async () => ({
-            chatId: "chat_1",
-            messages: [],
-          }),
-        } as Response);
-      }
 
       if (url === "/api/chat?chatId=chat_1" && init?.method === "PATCH") {
         return Promise.resolve({
@@ -541,13 +519,35 @@ describe("ChatApp", () => {
         } as Response);
       }
 
-      return Promise.resolve({
-        ok: true,
-        json: async () => ({ chats: [] }),
-      } as Response);
+      if (url === "/api/chat") {
+        chatListRequestCount += 1;
+
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({
+            chats: [
+              { id: "chat_1", title: "新的标题" },
+              { id: "chat_2", title: "另一个会话" },
+            ],
+          }),
+        } as Response);
+      }
+
+      throw new Error(`unexpected fetch: ${url}`);
     });
 
-    render(<ChatApp />);
+    render(
+      <ChatApp
+        initialData={createInitialData({
+          initialChats: [
+            { id: "chat_2", title: "另一个会话" },
+            { id: "chat_1", title: "旧标题" },
+          ],
+          initialChatId: "chat_1",
+        })}
+      />,
+    );
+
     expect((await screen.findAllByText("旧标题")).length).toBeGreaterThan(0);
 
     await user.click(screen.getByRole("button", { name: "重命名当前会话" }));
@@ -557,23 +557,6 @@ describe("ChatApp", () => {
 
     expect((await screen.findAllByText("新的标题")).length).toBeGreaterThan(0);
     expect(screen.queryByText("旧标题")).not.toBeInTheDocument();
-    expect(chatListRequestCount).toBe(2);
-
-    const chatButtons = screen
-      .getAllByRole("button")
-      .filter(
-        (button) =>
-          button.textContent?.includes("新的标题") ||
-          button.textContent?.includes("另一个会话"),
-      );
-
-    expect(
-      chatButtons.map((button) =>
-        button.textContent?.includes("新的标题") ? "新的标题" : "另一个会话",
-      ),
-    ).toEqual([
-      "新的标题",
-      "另一个会话",
-    ]);
+    expect(chatListRequestCount).toBe(1);
   });
 });

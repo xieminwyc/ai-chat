@@ -28,6 +28,7 @@ export type ChatRenameResult = {
 export type ChatRecord = {
   id: string;
   title: string;
+  userId: string;
 };
 
 export type CreateMessageInput = {

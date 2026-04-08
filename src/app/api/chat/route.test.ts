@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+const CHAT_ID = "cchat000001";
+
 const service = vi.hoisted(() => ({
   deleteChatById: vi.fn(),
   listChatSummaries: vi.fn(),
@@ -8,18 +10,36 @@ const service = vi.hoisted(() => ({
   renameChat: vi.fn(),
 }));
 
+const authService = vi.hoisted(() => ({
+  getCurrentSession: vi.fn(),
+}));
+
 const stream = vi.hoisted(() => ({
   createStreamingChatResponse: vi.fn(),
 }));
 
 vi.mock("@/server/chat/chat-service", () => service);
 vi.mock("@/server/chat/chat-stream", () => stream);
+vi.mock("@/server/auth/auth-service", () => authService);
 
 import { DELETE, GET, PATCH, POST } from "@/app/api/chat/route";
 
 describe("/api/chat route", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    authService.getCurrentSession.mockResolvedValue({
+      id: "session_1",
+      token: "session-token",
+      userId: "user_1",
+      expiresAt: new Date("2026-04-15T01:00:00.000Z"),
+      createdAt: new Date("2026-04-08T01:00:00.000Z"),
+      user: {
+        id: "user_1",
+        email: "alice@example.com",
+        createdAt: new Date("2026-04-08T01:00:00.000Z"),
+        updatedAt: new Date("2026-04-08T01:00:00.000Z"),
+      },
+    });
   });
 
   it("loads chat list through the chat service", async () => {
@@ -32,10 +52,16 @@ describe("/api/chat route", () => {
       },
     ]);
 
-    const response = await GET(new Request("http://localhost:3000/api/chat"));
+    const response = await GET(
+      new Request("http://localhost:3000/api/chat", {
+        headers: {
+          cookie: "ai-chat-session=session-token",
+        },
+      }),
+    );
     const data = await response.json();
 
-    expect(service.listChatSummaries).toHaveBeenCalledTimes(1);
+    expect(service.listChatSummaries).toHaveBeenCalledWith("user_1");
     expect(data.chats[0]).toMatchObject({
       createdAt: "2026-03-24T11:20:51.259Z",
       updatedAt: "2026-03-25T10:07:23.524Z",
@@ -53,11 +79,15 @@ describe("/api/chat route", () => {
     ]);
 
     const response = await GET(
-      new Request("http://localhost:3000/api/chat?chatId=chat_1"),
+      new Request(`http://localhost:3000/api/chat?chatId=${CHAT_ID}`, {
+        headers: {
+          cookie: "ai-chat-session=session-token",
+        },
+      }),
     );
     const data = await response.json();
 
-    expect(service.loadChatMessages).toHaveBeenCalledWith("chat_1");
+    expect(service.loadChatMessages).toHaveBeenCalledWith("user_1", CHAT_ID);
     expect(data.messages[0]).toMatchObject({
       createdAt: "2026-03-24T11:20:51.268Z",
     });
@@ -71,39 +101,49 @@ describe("/api/chat route", () => {
     });
 
     const response = await PATCH(
-      new Request("http://localhost:3000/api/chat?chatId=chat_1", {
+      new Request(`http://localhost:3000/api/chat?chatId=${CHAT_ID}`, {
         method: "PATCH",
         body: JSON.stringify({ title: "新的标题" }),
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          cookie: "ai-chat-session=session-token",
+        },
       }),
     );
     const data = await response.json();
 
-    expect(service.renameChat).toHaveBeenCalledWith("chat_1", "新的标题");
+    expect(service.renameChat).toHaveBeenCalledWith(
+      "user_1",
+      CHAT_ID,
+      "新的标题",
+    );
     expect(data.chat.updatedAt).toBe("2026-03-25T10:07:23.524Z");
   });
 
   it("deletes a chat through the service", async () => {
     const response = await DELETE(
-      new Request("http://localhost:3000/api/chat?chatId=chat_1", {
+      new Request(`http://localhost:3000/api/chat?chatId=${CHAT_ID}`, {
         method: "DELETE",
+        headers: {
+          cookie: "ai-chat-session=session-token",
+        },
       }),
     );
     const data = await response.json();
 
-    expect(service.deleteChatById).toHaveBeenCalledWith("chat_1");
+    expect(service.deleteChatById).toHaveBeenCalledWith("user_1", CHAT_ID);
     expect(data.success).toBe(true);
   });
 
   it("creates a streaming response after preparing a reply", async () => {
     const streamingResponse = new Response("第一段第二段", {
       headers: {
-        "X-Chat-Id": "chat_1",
+        "X-Chat-Id": CHAT_ID,
       },
     });
 
     service.prepareChatReply.mockResolvedValue({
-      chatId: "chat_1",
+      chatId: CHAT_ID,
       isNewChat: false,
       replyStream: (async function* () {
         yield "第一段";
@@ -116,23 +156,37 @@ describe("/api/chat route", () => {
       new Request("http://localhost:3000/api/chat", {
         method: "POST",
         body: JSON.stringify({
-          chatId: "chat_1",
+          chatId: CHAT_ID,
           message: "继续学习数据库",
         }),
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          cookie: "ai-chat-session=session-token",
+        },
       }),
     );
 
     expect(service.prepareChatReply).toHaveBeenCalledWith({
-      chatId: "chat_1",
+      userId: "user_1",
+      chatId: CHAT_ID,
       message: "继续学习数据库",
     });
     expect(stream.createStreamingChatResponse).toHaveBeenCalledWith({
-      chatId: "chat_1",
+      chatId: CHAT_ID,
       replyStream: expect.any(Object),
       startedAt: expect.any(Number),
     });
     expect(response.status).toBe(200);
     expect(await response.text()).toBe("第一段第二段");
+  });
+
+  it("returns 401 when the request has no authenticated session", async () => {
+    authService.getCurrentSession.mockResolvedValue(null);
+
+    const response = await GET(new Request("http://localhost:3000/api/chat"));
+    const data = await response.json();
+
+    expect(response.status).toBe(401);
+    expect(data.error).toBe("Authentication is required");
   });
 });

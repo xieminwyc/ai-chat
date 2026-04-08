@@ -38,27 +38,35 @@ describe("chat-service", () => {
       { id: "message_1", role: "user", content: "你好" },
     ]);
 
-    await expect(listChatSummaries()).resolves.toEqual([
+    await expect(listChatSummaries("user_1")).resolves.toEqual([
       { id: "chat_1", title: "测试标题" },
     ]);
-    await expect(loadChatMessages("chat_1")).resolves.toEqual([
+    await expect(loadChatMessages("user_1", "chat_1")).resolves.toEqual([
       { id: "message_1", role: "user", content: "你好" },
     ]);
+    expect(repository.listChats).toHaveBeenCalledWith("user_1");
+    expect(repository.getChatMessages).toHaveBeenCalledWith("chat_1", "user_1");
   });
 
   it("renames and deletes chats through the repository", async () => {
+    repository.getChatById.mockResolvedValue({
+      id: "chat_1",
+      title: "旧标题",
+      userId: "user_1",
+    });
     repository.renameChatTitle.mockResolvedValue({
       id: "chat_1",
       title: "新的标题",
       updatedAt: new Date("2026-03-25T10:07:23.524Z"),
     });
 
-    await expect(renameChat("chat_1", "新的标题")).resolves.toMatchObject({
+    await expect(renameChat("user_1", "chat_1", "新的标题")).resolves.toMatchObject({
       title: "新的标题",
     });
 
-    await deleteChatById("chat_1");
+    await deleteChatById("user_1", "chat_1");
 
+    expect(repository.getChatById).toHaveBeenCalledWith("chat_1", "user_1");
     expect(repository.renameChatTitle).toHaveBeenCalledWith("chat_1", "新的标题");
     expect(repository.deleteChat).toHaveBeenCalledWith("chat_1");
   });
@@ -71,6 +79,7 @@ describe("chat-service", () => {
     repository.getChatById.mockResolvedValue({
       id: "chat_1",
       title: "旧标题",
+      userId: "user_1",
     });
     repository.getConversationMessages.mockResolvedValue([
       { role: "user", content: "继续学习数据库" },
@@ -78,11 +87,13 @@ describe("chat-service", () => {
     provider.streamAssistantReply.mockResolvedValue(replyStream);
 
     const result = await prepareChatReply({
+      userId: "user_1",
       chatId: "chat_1",
       message: "继续学习数据库",
     });
 
     expect(repository.createChat).not.toHaveBeenCalled();
+    expect(repository.getChatById).toHaveBeenCalledWith("chat_1", "user_1");
     expect(repository.createMessage).toHaveBeenCalledWith({
       chatId: "chat_1",
       role: "user",
@@ -109,18 +120,20 @@ describe("chat-service", () => {
     repository.createChat.mockResolvedValue({
       id: "chat_new",
       title: "测试标题",
+      userId: "user_1",
     });
     provider.createAssistantReply.mockReturnValue("测试标题");
     provider.streamAssistantReply.mockResolvedValue(replyStream);
 
     const result = await prepareChatReply({
+      userId: "user_1",
       message: "新会话的第一条消息",
     });
 
     expect(provider.createAssistantReply).toHaveBeenCalledWith("新会话的第一条消息", {
       mode: "title",
     });
-    expect(repository.createChat).toHaveBeenCalledWith("测试标题");
+    expect(repository.createChat).toHaveBeenCalledWith("测试标题", "user_1");
     expect(repository.createMessage).toHaveBeenCalledWith({
       chatId: "chat_new",
       role: "user",
