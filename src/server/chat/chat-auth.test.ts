@@ -9,7 +9,9 @@ import {
 
 describe("chat-auth", () => {
   it("throws when no authenticated user is present", () => {
-    expect(() => requireAuthenticatedUser(null)).toThrow(UnauthorizedError);
+    expect(() => requireAuthenticatedUser(null)).toThrowError(
+      "登录状态已失效，请重新登录。",
+    );
   });
 
   it("returns the authenticated user when present", () => {

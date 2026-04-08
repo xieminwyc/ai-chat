@@ -10,6 +10,22 @@
 
 ---
 
+## Execution Status
+
+- Status: Completed on `2026-04-08`
+- Completed scope:
+  - Task 1: Auth data model and core helpers
+  - Task 2: Auth service and auth route handlers
+  - Task 3: Chat ownership and structured request validation
+  - Task 4: Server-side page bootstrap for the home route
+- Final polish included:
+  - chat `401` 时自动退回未登录态
+  - 保留当前消息区并提示重新登录
+  - 统一聊天鉴权失败文案为 `登录状态已失效，请重新登录。`
+- Next planning entry:
+  - move to `docs/superpowers/specs/2026-04-02-auth-and-guest-trial-design.md`
+  - start the next implementation slice around `游客试用 / 额度限制 / 历史合并`
+
 ## File Map
 
 - Create: `src/server/auth/auth-types.ts`

@@ -187,6 +187,6 @@ describe("/api/chat route", () => {
     const data = await response.json();
 
     expect(response.status).toBe(401);
-    expect(data.error).toBe("Authentication is required");
+    expect(data.error).toBe("登录状态已失效，请重新登录。");
   });
 });

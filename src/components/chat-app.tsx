@@ -1,7 +1,7 @@
 "use client";
 
 import dayjs from "dayjs";
-import { FormEvent, useEffect, useRef, useState } from "react";
+import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
 
 import { createBrowserId } from "@/lib/browser-id";
 import type { HomePageData } from "@/server/page/home-data";
@@ -27,6 +27,29 @@ const quickStartIdeas = [
   "把这段技术方案改写成更清楚的人话版本",
   "陪我一步步拆解一个现在有点卡住的问题",
 ];
+
+const workspaceNotes = [
+  {
+    label: "Private by default",
+    value: "按账号隔离会话、状态和上下文。",
+  },
+  {
+    label: "Server-first shell",
+    value: "首屏由 cookie 与 session 决定，再交给客户端继续交互。",
+  },
+  {
+    label: "Thoughtful flow",
+    value: "把输入、历史和流式回复放进一个更安静的工作台里。",
+  },
+];
+
+const authBenefits = [
+  "保留你自己的历史对话和上下文",
+  "把首屏身份判断交回服务端处理",
+  "让会话切换、刷新与恢复更加稳定",
+];
+
+const sessionExpiredMessage = "登录状态已失效，请重新登录。";
 
 function formatChatUpdatedAt(updatedAt?: string) {
   if (!updatedAt) {
@@ -62,6 +85,14 @@ function getAuthFeedbackMessage(mode: AuthMode, backendError?: string) {
   return backendError;
 }
 
+type ErrorPayload = {
+  error?: string;
+};
+
+type SignedOutStateOptions = {
+  preserveMessages?: boolean;
+};
+
 export function ChatApp({ initialData }: { initialData: HomePageData }) {
   // 这些 state 不再靠首屏 useEffect 去拉接口初始化，而是直接吃服务端传下来的 bootstrap 数据。
   const [input, setInput] = useState("");
@@ -93,6 +124,60 @@ export function ChatApp({ initialData }: { initialData: HomePageData }) {
   const activeChatUpdatedAt = formatChatUpdatedAt(activeChat?.updatedAt);
   const hasMessages = messages.length > 0;
   const hasAuthError = authFeedbackTone === "error";
+  const currentUserLabel = currentUser?.email ?? "已登录用户";
+  const savedSessionCount = String(chats.length).padStart(2, "0");
+  const workspaceModeLabel = isAuthenticated ? "Account synced" : "Guest preview";
+  const workspaceStateLabel = error
+    ? "Needs attention"
+    : isLoading
+      ? "Reply streaming"
+      : hasMessages
+        ? "Conversation active"
+        : "Quiet and ready";
+  const composerHint = isAuthenticated
+    ? "当前回复来自服务端模型流式输出，聊天记录会继续保存到 PostgreSQL，方便你回到同一段上下文。"
+    : "输入区仍然保留在工作台里，但真正能不能继续发送、保存和恢复会话，仍由服务端身份状态决定。";
+
+  const syncChatIdToUrl = useCallback((nextChatId: string | null) => {
+    const nextUrl = new URL(window.location.href);
+
+    if (nextChatId) {
+      nextUrl.searchParams.set("chatId", nextChatId);
+    } else {
+      nextUrl.searchParams.delete("chatId");
+    }
+
+    window.history.replaceState(null, "", nextUrl.toString());
+  }, []);
+
+  const moveToSignedOutState = useCallback((
+    message: string,
+    options?: SignedOutStateOptions,
+  ) => {
+    // 只要后端返回 401，就说明“前端以为自己还登录着”这个假设已经不成立了。
+    // 这里统一把页面切回未登录态，避免用户继续在过期 session 上操作。
+    const preserveMessages = options?.preserveMessages ?? false;
+    const rememberedEmail = currentUser?.email ?? authEmail;
+
+    setInput("");
+    setIsAuthenticated(false);
+    setCurrentUser(null);
+    setChats([]);
+    if (!preserveMessages) {
+      setMessages([]);
+    }
+    setChatId(null);
+    setIsRenaming(false);
+    setTitleDraft("");
+    setError(message);
+    setAuthMode("login");
+    setAuthEmail(rememberedEmail);
+    setAuthPassword("");
+    setAuthFeedback(message);
+    setAuthFeedbackTone("error");
+    window.localStorage.removeItem("activeChatId");
+    syncChatIdToUrl(null);
+  }, [authEmail, currentUser?.email, syncChatIdToUrl]);
 
   useEffect(() => {
     if (messages.length === 0) {
@@ -141,6 +226,11 @@ export function ChatApp({ initialData }: { initialData: HomePageData }) {
           messages?: ChatMessage[];
         };
 
+        if (response.status === 401) {
+          moveToSignedOutState(data.error || sessionExpiredMessage);
+          return;
+        }
+
         if (!response.ok) {
           throw new Error(data.error || "读取历史消息失败");
         }
@@ -155,19 +245,7 @@ export function ChatApp({ initialData }: { initialData: HomePageData }) {
         );
       }
     })();
-  }, [chatId, chats, isAuthenticated]);
-
-  function syncChatIdToUrl(nextChatId: string | null) {
-    const nextUrl = new URL(window.location.href);
-
-    if (nextChatId) {
-      nextUrl.searchParams.set("chatId", nextChatId);
-    } else {
-      nextUrl.searchParams.delete("chatId");
-    }
-
-    window.history.replaceState(null, "", nextUrl.toString());
-  }
+  }, [chatId, chats, isAuthenticated, moveToSignedOutState, syncChatIdToUrl]);
 
   async function loadChatHistory(activeChatId: string) {
     try {
@@ -177,6 +255,13 @@ export function ChatApp({ initialData }: { initialData: HomePageData }) {
         error?: string;
         messages?: ChatMessage[];
       };
+
+      if (response.status === 401) {
+        moveToSignedOutState(data.error || sessionExpiredMessage, {
+          preserveMessages: true,
+        });
+        return;
+      }
 
       if (!response.ok) {
         throw new Error(data.error || "读取历史消息失败");
@@ -206,6 +291,13 @@ export function ChatApp({ initialData }: { initialData: HomePageData }) {
         chats?: ChatSummary[];
         error?: string;
       };
+
+      if (response.status === 401) {
+        moveToSignedOutState(data.error || sessionExpiredMessage, {
+          preserveMessages: true,
+        });
+        return;
+      }
 
       if (!response.ok) {
         throw new Error(data.error || "读取会话列表失败");
@@ -244,6 +336,11 @@ export function ChatApp({ initialData }: { initialData: HomePageData }) {
         error?: string;
       };
 
+      if (response.status === 401) {
+        moveToSignedOutState(data.error || sessionExpiredMessage);
+        return;
+      }
+
       if (!response.ok || !data.chat) {
         throw new Error(data.error || "更新标题失败");
       }
@@ -274,6 +371,11 @@ export function ChatApp({ initialData }: { initialData: HomePageData }) {
         error?: string;
         success?: boolean;
       };
+
+      if (response.status === 401) {
+        moveToSignedOutState(data.error || sessionExpiredMessage);
+        return;
+      }
 
       if (!response.ok) {
         throw new Error(data.error || "删除会话失败");
@@ -427,10 +529,16 @@ export function ChatApp({ initialData }: { initialData: HomePageData }) {
         body: JSON.stringify(requestBody),
       });
 
+      if (response.status === 401) {
+        const data = (await response.json()) as ErrorPayload;
+        moveToSignedOutState(data.error || sessionExpiredMessage, {
+          preserveMessages: true,
+        });
+        return;
+      }
+
       if (!response.ok) {
-        const data = (await response.json()) as {
-          error?: string;
-        };
+        const data = (await response.json()) as ErrorPayload;
 
         throw new Error(data.error || "请求失败");
       }
@@ -501,34 +609,235 @@ export function ChatApp({ initialData }: { initialData: HomePageData }) {
     }
   }
 
+  function renderAuthPanel(isCompact = false) {
+    return (
+      <div
+        className={
+          isCompact
+            ? "rounded-[1.85rem] border border-[rgba(24,48,59,0.1)] bg-[linear-gradient(145deg,rgba(248,241,231,0.92),rgba(255,255,255,0.88))] p-5 shadow-[0_18px_35px_rgba(24,48,59,0.08)]"
+            : "rounded-[2.2rem] border border-[rgba(24,48,59,0.1)] bg-[linear-gradient(155deg,rgba(248,242,232,0.96),rgba(255,255,255,0.82))] p-6 shadow-[0_24px_60px_rgba(24,48,59,0.08)]"
+        }
+      >
+        <p className="text-xs font-semibold uppercase tracking-[0.34em] text-slate-500">
+          {isCompact ? "Reconnect workspace" : "Account access"}
+        </p>
+        <h3
+          className={
+            isCompact
+              ? "mt-4 font-display text-[2rem] leading-none tracking-[-0.04em] text-slate-900"
+              : "mt-5 font-display text-[2.85rem] leading-none tracking-[-0.05em] text-slate-900"
+          }
+        >
+          {isCompact
+            ? "刚才的上下文还在，先把身份接回来"
+            : "先登录，再开始真正的服务端聊天流程"}
+        </h3>
+        <p className="mt-3 text-sm leading-7 text-slate-600">
+          {isCompact
+            ? "当前对话没有被抹掉，只是发送、保存和切换会话已经暂时上锁。重新登录后，再继续这段思路。"
+            : "未登录态不是普通表单卡片，而是一段进入工作台之前的过渡空间。先确认身份，再把账号、会话和上下文重新接上。"}
+        </p>
+
+        {!isCompact ? (
+          <div className="mt-7 rounded-[1.7rem] border border-white/80 bg-white/68 px-5 py-5 shadow-[inset_0_1px_0_rgba(255,255,255,0.92)]">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.34em] text-slate-500">
+              Private workspace
+            </p>
+            <p className="mt-3 text-sm leading-7 text-slate-700">
+              为账号、会话和思考过程预留一个安静且可恢复的空间。
+            </p>
+            <ul className="mt-5 space-y-3 text-sm leading-6 text-slate-600">
+              {authBenefits.map((benefit) => (
+                <li key={benefit} className="flex gap-3">
+                  <span
+                    aria-hidden="true"
+                    className="mt-2 h-1.5 w-1.5 rounded-full bg-[color:var(--accent)]"
+                  />
+                  <span>{benefit}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
+
+        <div className="mt-7 flex gap-2">
+          <button
+            className={`inline-flex min-h-11 flex-1 items-center justify-center rounded-full px-4 py-3 text-sm font-medium transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-500/30 ${
+              authMode === "login"
+                ? "bg-slate-900 text-white"
+                : "border border-[rgba(24,48,59,0.12)] bg-white text-slate-700"
+            }`}
+            onClick={() => {
+              setAuthMode("login");
+              setAuthFeedback(null);
+              setAuthFeedbackTone(null);
+            }}
+            type="button"
+          >
+            登录
+          </button>
+          <button
+            className={`inline-flex min-h-11 flex-1 items-center justify-center rounded-full px-4 py-3 text-sm font-medium transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-500/30 ${
+              authMode === "register"
+                ? "bg-slate-900 text-white"
+                : "border border-[rgba(24,48,59,0.12)] bg-white text-slate-700"
+            }`}
+            onClick={() => {
+              setAuthMode("register");
+              setAuthFeedback(null);
+              setAuthFeedbackTone(null);
+            }}
+            type="button"
+          >
+            注册
+          </button>
+        </div>
+
+        <form
+          className={isCompact ? "mt-5 grid gap-4 lg:grid-cols-2" : "mt-6 space-y-4"}
+          onSubmit={handleAuthSubmit}
+        >
+          <label className="block text-sm font-medium text-slate-700">
+            <span className="mb-2 block">邮箱</span>
+            <input
+              autoComplete="email"
+              aria-invalid={hasAuthError ? true : undefined}
+              className={`min-h-11 w-full rounded-2xl border bg-white/90 px-4 py-3 text-sm text-slate-900 outline-none transition focus:ring-4 ${
+                hasAuthError
+                  ? "border-red-300 focus:border-red-400 focus:ring-red-100"
+                  : "border-[rgba(24,48,59,0.12)] focus:border-slate-400 focus:ring-slate-200/60"
+              }`}
+              onChange={(event) => {
+                setAuthEmail(event.target.value);
+                if (authFeedback) {
+                  setAuthFeedback(null);
+                  setAuthFeedbackTone(null);
+                }
+              }}
+              placeholder="alice@example.com"
+              type="email"
+              value={authEmail}
+            />
+          </label>
+          <label className="block text-sm font-medium text-slate-700">
+            <span className="mb-2 block">密码</span>
+            <input
+              autoComplete={
+                authMode === "login" ? "current-password" : "new-password"
+              }
+              aria-invalid={hasAuthError ? true : undefined}
+              className={`min-h-11 w-full rounded-2xl border bg-white/90 px-4 py-3 text-sm text-slate-900 outline-none transition focus:ring-4 ${
+                hasAuthError
+                  ? "border-red-300 focus:border-red-400 focus:ring-red-100"
+                  : "border-[rgba(24,48,59,0.12)] focus:border-slate-400 focus:ring-slate-200/60"
+              }`}
+              onChange={(event) => {
+                setAuthPassword(event.target.value);
+                if (authFeedback) {
+                  setAuthFeedback(null);
+                  setAuthFeedbackTone(null);
+                }
+              }}
+              placeholder="至少 8 位"
+              type="password"
+              value={authPassword}
+            />
+          </label>
+
+          {authFeedback ? (
+            <div
+              className={`rounded-[1.25rem] border px-4 py-3 text-sm leading-6 ${
+                authFeedbackTone === "error"
+                  ? "border-red-200/80 bg-red-50/90 text-red-700"
+                  : "border-emerald-200/80 bg-emerald-50/90 text-emerald-700"
+              } ${isCompact ? "lg:col-span-2" : ""}`}
+              role={authFeedbackTone === "error" ? "alert" : "status"}
+            >
+              {authFeedback}
+            </div>
+          ) : null}
+
+          <div className={isCompact ? "lg:col-span-2" : ""}>
+            <button
+              className="inline-flex min-h-11 w-full items-center justify-center rounded-full bg-[linear-gradient(135deg,#18303b,#325869)] px-5 py-3 text-sm font-semibold text-white shadow-[0_14px_28px_rgba(24,48,59,0.2)] transition hover:translate-y-[-1px] hover:shadow-[0_18px_32px_rgba(24,48,59,0.24)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-500/40 disabled:cursor-not-allowed disabled:translate-y-0 disabled:opacity-60"
+              disabled={isAuthSubmitting}
+              type="submit"
+            >
+              {isAuthSubmitting
+                ? "提交中..."
+                : authMode === "login"
+                  ? "登录并刷新页面"
+                  : "注册账号"}
+            </button>
+          </div>
+        </form>
+      </div>
+    );
+  }
+
   return (
-    <main className="relative h-[100svh] overflow-hidden px-4 py-4 text-slate-900 sm:px-6 sm:py-6 lg:px-8 lg:py-8">
+    <main className="relative min-h-[100svh] overflow-hidden px-4 py-4 text-slate-950 sm:px-6 sm:py-6 lg:px-8 lg:py-8">
       <div
         aria-hidden="true"
         className="pointer-events-none absolute inset-0 overflow-hidden"
       >
-        <div className="absolute left-[-8rem] top-[-5rem] h-72 w-72 rounded-full bg-[radial-gradient(circle,rgba(255,255,255,0.82),rgba(255,255,255,0))]" />
-        <div className="absolute right-[-4rem] top-20 h-64 w-64 rounded-full bg-[radial-gradient(circle,rgba(244,199,141,0.34),rgba(244,199,141,0))]" />
-        <div className="absolute bottom-[-5rem] left-1/3 h-72 w-72 rounded-full bg-[radial-gradient(circle,rgba(158,194,214,0.28),rgba(158,194,214,0))]" />
+        <div className="absolute inset-0 bg-[linear-gradient(140deg,rgba(255,252,246,0.68),rgba(255,255,255,0)_34%,rgba(204,180,139,0.08)_68%,rgba(23,43,58,0.04))]" />
+        <div className="ambient-orb absolute left-[-10rem] top-[-7rem] h-[28rem] w-[28rem] rounded-full bg-[radial-gradient(circle,rgba(255,255,255,0.9),rgba(255,255,255,0))]" />
+        <div className="ambient-orb ambient-orb-delayed absolute right-[-6rem] top-16 h-80 w-80 rounded-full bg-[radial-gradient(circle,rgba(207,169,112,0.28),rgba(207,169,112,0))]" />
+        <div className="ambient-orb absolute bottom-[-7rem] left-1/3 h-[24rem] w-[24rem] rounded-full bg-[radial-gradient(circle,rgba(163,188,204,0.24),rgba(163,188,204,0))]" />
+        <div className="absolute inset-x-10 top-10 h-px bg-[linear-gradient(90deg,rgba(19,36,51,0),rgba(19,36,51,0.18),rgba(19,36,51,0))]" />
       </div>
 
-      <div className="relative mx-auto h-full w-full max-w-7xl">
-        <section className="grid h-full min-h-0 gap-4 lg:grid-cols-[280px_minmax(0,1fr)]">
-          <aside className="hidden min-h-0 flex-col rounded-[2rem] border border-[rgba(24,48,59,0.1)] bg-white/55 p-4 shadow-[0_18px_45px_rgba(24,48,59,0.08)] backdrop-blur-xl lg:flex">
-            <div className="shrink-0 rounded-[1.5rem] border border-white/70 bg-white/68 p-4 shadow-sm">
-              <p className="text-[11px] font-semibold uppercase tracking-[0.34em] text-slate-500">
-                Thoughtful AI
-              </p>
-              <h1 className="mt-3 text-lg font-semibold tracking-[-0.02em] text-slate-900">
-                AI Chat Studio
-              </h1>
-              <p className="mt-2 text-sm leading-6 text-slate-600">
+      <div className="relative mx-auto h-full w-full max-w-[96rem]">
+        <section className="grid h-full min-h-0 gap-4 xl:grid-cols-[320px_minmax(0,1fr)]">
+          <aside className="hidden min-h-0 flex-col overflow-hidden rounded-[2.25rem] border border-[rgba(19,36,51,0.1)] bg-[linear-gradient(180deg,rgba(255,251,245,0.78),rgba(243,235,224,0.6))] p-5 shadow-[0_28px_80px_rgba(19,36,51,0.12)] backdrop-blur-2xl xl:flex">
+            <div className="shrink-0 rounded-[1.9rem] border border-white/75 bg-[linear-gradient(180deg,rgba(255,252,248,0.95),rgba(245,237,226,0.78))] p-5 shadow-[0_20px_45px_rgba(19,36,51,0.08)]">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.34em] text-slate-500">
+                    Issue 01
+                  </p>
+                  <h1 className="mt-4 font-display text-[2.2rem] leading-none tracking-[-0.04em] text-slate-950">
+                    AI Chat Studio
+                  </h1>
+                </div>
+                <span className="rounded-full border border-[rgba(19,36,51,0.1)] bg-white/75 px-3 py-1.5 text-[10px] font-semibold uppercase tracking-[0.28em] text-slate-500">
+                  Calm Editorial
+                </span>
+              </div>
+              <p className="mt-4 text-sm leading-7 text-slate-600">
                 {isAuthenticated
-                  ? `当前账号：${currentUser?.email ?? "已登录用户"}`
+                  ? `当前账号：${currentUserLabel}`
                   : "先登录，再开始真正按账号隔离的聊天记录与权限控制"}
               </p>
+              <div className="mt-6 grid grid-cols-3 gap-2">
+                <div className="rounded-[1.2rem] border border-[rgba(19,36,51,0.08)] bg-white/72 px-3 py-3">
+                  <p className="text-[10px] font-semibold uppercase tracking-[0.24em] text-slate-400">
+                    Mode
+                  </p>
+                  <p className="mt-2 text-xs leading-5 text-slate-700">
+                    {workspaceModeLabel}
+                  </p>
+                </div>
+                <div className="rounded-[1.2rem] border border-[rgba(19,36,51,0.08)] bg-white/72 px-3 py-3">
+                  <p className="text-[10px] font-semibold uppercase tracking-[0.24em] text-slate-400">
+                    State
+                  </p>
+                  <p className="mt-2 text-xs leading-5 text-slate-700">
+                    {workspaceStateLabel}
+                  </p>
+                </div>
+                <div className="rounded-[1.2rem] border border-[rgba(19,36,51,0.08)] bg-white/72 px-3 py-3">
+                  <p className="text-[10px] font-semibold uppercase tracking-[0.24em] text-slate-400">
+                    Saved
+                  </p>
+                  <p className="mt-2 text-xs leading-5 text-slate-700">
+                    {savedSessionCount}
+                  </p>
+                </div>
+              </div>
               <button
-                className="mt-4 inline-flex min-h-11 w-full items-center justify-center rounded-full bg-[linear-gradient(135deg,#18303b,#355b6d)] px-4 py-3 text-sm font-semibold text-white shadow-[0_14px_28px_rgba(24,48,59,0.24)] transition hover:translate-y-[-1px] hover:shadow-[0_18px_32px_rgba(24,48,59,0.26)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-500/40 disabled:cursor-not-allowed disabled:opacity-60"
+                className="mt-6 inline-flex min-h-11 w-full items-center justify-center rounded-full bg-[linear-gradient(135deg,#162738,#355469)] px-4 py-3 text-sm font-semibold text-white shadow-[0_18px_35px_rgba(19,36,51,0.2)] transition hover:translate-y-[-1px] hover:shadow-[0_22px_40px_rgba(19,36,51,0.22)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-500/40 disabled:cursor-not-allowed disabled:opacity-60"
                 disabled={!isAuthenticated}
                 onClick={handleStartNewChat}
                 type="button"
@@ -601,8 +910,25 @@ export function ChatApp({ initialData }: { initialData: HomePageData }) {
                   登录后，这里会显示当前账号自己的聊天列表，不会再是全局共享数据。
                 </div>
               ) : chats.length === 0 ? (
-                <div className="rounded-[1.5rem] border border-dashed border-[rgba(24,48,59,0.18)] bg-white/56 px-4 py-4 text-sm leading-6 text-slate-500">
-                  还没有历史对话。发出第一条消息后，这里会开始记录你的思路轨迹。
+                <div className="space-y-3">
+                  <div className="rounded-[1.5rem] border border-dashed border-[rgba(24,48,59,0.18)] bg-white/56 px-4 py-4 text-sm leading-6 text-slate-500">
+                    还没有历史对话。发出第一条消息后，这里会开始记录你的思路轨迹。
+                  </div>
+                  <div className="grid gap-2">
+                    {workspaceNotes.map((note) => (
+                      <div
+                        key={note.label}
+                        className="rounded-[1.35rem] border border-[rgba(24,48,59,0.08)] bg-white/76 px-4 py-3 shadow-sm"
+                      >
+                        <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-500">
+                          {note.label}
+                        </p>
+                        <p className="mt-2 text-sm leading-6 text-slate-600">
+                          {note.value}
+                        </p>
+                      </div>
+                    ))}
+                  </div>
                 </div>
               ) : (
                 <div className="space-y-2">
@@ -641,21 +967,31 @@ export function ChatApp({ initialData }: { initialData: HomePageData }) {
             </div>
           </aside>
 
-          <div className="flex min-h-0 min-w-0 flex-col rounded-[2rem] border border-[rgba(24,48,59,0.1)] bg-white/50 shadow-[0_22px_60px_rgba(24,48,59,0.1)] backdrop-blur-xl">
-            <header className="flex shrink-0 items-center justify-between gap-3 border-b border-[rgba(24,48,59,0.08)] px-4 py-3 sm:px-6">
+          <div className="flex min-h-0 min-w-0 flex-col rounded-[2rem] border border-[rgba(24,48,59,0.1)] bg-[linear-gradient(180deg,rgba(255,255,255,0.62),rgba(252,249,244,0.5))] shadow-[0_22px_60px_rgba(24,48,59,0.1)] backdrop-blur-xl">
+            <header className="flex shrink-0 flex-col gap-4 border-b border-[rgba(24,48,59,0.08)] px-4 py-4 sm:px-6">
+              <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
                 <p className="text-[11px] font-semibold uppercase tracking-[0.34em] text-slate-500">
-                  {isAuthenticated ? "Signed In" : "Signed Out"}
+                  {isAuthenticated ? "Workspace Header" : "Recovery Desk"}
                 </p>
-                <h2 className="mt-1 truncate text-base font-semibold text-slate-900 sm:text-lg">
+                <h2 className="mt-1 truncate font-display text-[1.8rem] leading-none tracking-[-0.04em] text-slate-900 sm:text-[2.2rem]">
                   {isAuthenticated
                     ? chatId
                       ? activeChatTitle
                       : "准备开始新的对话"
-                    : "先完成登录或注册"}
+                    : hasMessages
+                      ? "恢复身份后，再继续这段对话"
+                      : "先完成登录或注册"}
                 </h2>
+                <p className="mt-3 max-w-2xl text-sm leading-7 text-slate-600">
+                  {isAuthenticated
+                    ? "左侧整理账号与会话，右侧保留真正用于思考、提问和推进工作的空间。"
+                    : hasMessages
+                      ? "当前内容仍保留在眼前，但继续发送、保存和切换会话前，需要先重新确认你的身份。"
+                      : "未登录时先展示身份入口与工作台轮廓，登录后再进入真正可恢复的个人会话空间。"}
+                </p>
               </div>
-              <div className="hidden items-center gap-2 sm:flex">
+                <div className="hidden items-center gap-2 sm:flex">
                 {activeChatUpdatedAt ? (
                   <span className="rounded-full border border-white/70 bg-white/84 px-3 py-1.5 text-xs text-slate-500 shadow-sm">
                     {activeChatUpdatedAt}
@@ -664,7 +1000,7 @@ export function ChatApp({ initialData }: { initialData: HomePageData }) {
                 {isAuthenticated ? (
                   <>
                     <span className="rounded-full border border-white/70 bg-white/84 px-3 py-1.5 text-xs text-slate-500 shadow-sm">
-                      {currentUser?.email}
+                      {currentUserLabel}
                     </span>
                     <button
                       className="inline-flex min-h-10 items-center justify-center rounded-full border border-[rgba(24,48,59,0.12)] bg-white/90 px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-500/30"
@@ -675,7 +1011,24 @@ export function ChatApp({ initialData }: { initialData: HomePageData }) {
                       退出登录
                     </button>
                   </>
-                ) : null}
+                ) : (
+                  <span className="rounded-full border border-[rgba(24,48,59,0.1)] bg-white/82 px-3 py-1.5 text-xs text-slate-500 shadow-sm">
+                    服务端身份已断开
+                  </span>
+                )}
+              </div>
+              </div>
+
+              <div className="flex flex-wrap gap-2">
+                <span className="rounded-full border border-[rgba(24,48,59,0.1)] bg-white/78 px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-500 shadow-sm">
+                  {workspaceModeLabel}
+                </span>
+                <span className="rounded-full border border-[rgba(24,48,59,0.1)] bg-white/78 px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-500 shadow-sm">
+                  {workspaceStateLabel}
+                </span>
+                <span className="rounded-full border border-[rgba(24,48,59,0.1)] bg-white/78 px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-500 shadow-sm">
+                  {savedSessionCount} saved sessions
+                </span>
               </div>
             </header>
 
@@ -688,12 +1041,6 @@ export function ChatApp({ initialData }: { initialData: HomePageData }) {
             >
               {hasMessages ? (
                 <div className="mx-auto flex w-full max-w-4xl flex-col gap-4">
-                  {error ? (
-                    <div className="rounded-[1.4rem] border border-red-200/80 bg-red-50/90 px-4 py-3 text-sm leading-6 text-red-700 shadow-sm">
-                      {error}
-                    </div>
-                  ) : null}
-
                   {messages.map((message) => {
                     const isUser = message.role === "user";
 
@@ -727,6 +1074,14 @@ export function ChatApp({ initialData }: { initialData: HomePageData }) {
                       </div>
                     </div>
                   ) : null}
+
+                  {error ? (
+                    <div className="rounded-[1.4rem] border border-red-200/80 bg-red-50/90 px-4 py-3 text-sm leading-6 text-red-700 shadow-sm">
+                      {error}
+                    </div>
+                  ) : null}
+
+                  {!isAuthenticated ? renderAuthPanel(true) : null}
                 </div>
               ) : isAuthenticated ? (
                 <div className="mx-auto flex h-full w-full max-w-3xl flex-col items-center justify-center py-8 text-center">
@@ -740,8 +1095,7 @@ export function ChatApp({ initialData }: { initialData: HomePageData }) {
                     把灵感、问题和暂时说不清的想法，都放进这里慢慢整理。
                   </p>
                   <p className="mt-2 max-w-2xl text-sm leading-7 text-slate-500">
-                    这次布局参考了主流 AI 聊天产品常见的方式:
-                    把主要高度留给消息区，把欢迎内容压缩到真正空态时才出现。
+                    从一个问题开始，或先借一个轻一点的提示，把今天真正要处理的事放进来。
                   </p>
 
                   {error ? (
@@ -750,7 +1104,25 @@ export function ChatApp({ initialData }: { initialData: HomePageData }) {
                     </div>
                   ) : null}
 
-                  <div className="mt-8 grid w-full gap-3 sm:grid-cols-3">
+                  <div className="mt-8 w-full text-left">
+                    <p className="text-[11px] font-semibold uppercase tracking-[0.34em] text-slate-500">
+                      Empty workspace
+                    </p>
+                    <p className="mt-3 text-sm leading-7 text-slate-600">
+                      还没有开始保存新的会话。你可以直接输入问题，或者先选一个更轻一点的开场提示。
+                    </p>
+                  </div>
+
+                  <div className="mt-8 w-full text-left">
+                    <p className="text-[11px] font-semibold uppercase tracking-[0.34em] text-slate-500">
+                      Quick start prompts
+                    </p>
+                    <p className="mt-3 text-sm leading-7 text-slate-500">
+                      这些提示只负责帮你起步，不会锁死后面的对话方向。
+                    </p>
+                  </div>
+
+                  <div className="mt-4 grid w-full gap-3 sm:grid-cols-3">
                     {quickStartIdeas.map((idea) => (
                       <button
                         key={idea}
@@ -764,134 +1136,8 @@ export function ChatApp({ initialData }: { initialData: HomePageData }) {
                   </div>
                 </div>
               ) : (
-                <div className="mx-auto flex h-full w-full max-w-xl flex-col justify-center py-8">
-                  <div className="rounded-[2rem] border border-[rgba(24,48,59,0.1)] bg-white/82 p-6 shadow-[0_18px_45px_rgba(24,48,59,0.08)]">
-                    <p className="text-xs font-semibold uppercase tracking-[0.34em] text-slate-500">
-                      Auth Shell
-                    </p>
-                    <h3 className="mt-4 text-3xl font-semibold tracking-[-0.03em] text-slate-900">
-                      先登录，再开始真正的服务端聊天流程
-                    </h3>
-                    <p className="mt-3 text-sm leading-7 text-slate-600">
-                      这一步的重点不是做复杂 UI，而是让你看到：
-                      页面首屏数据由服务端根据 cookie 和 session 决定，
-                      前端只负责后续交互。
-                    </p>
-
-                    <div className="mt-6 flex gap-2">
-                      <button
-                        className={`inline-flex min-h-11 flex-1 items-center justify-center rounded-full px-4 py-3 text-sm font-medium transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-500/30 ${
-                          authMode === "login"
-                            ? "bg-slate-900 text-white"
-                            : "border border-[rgba(24,48,59,0.12)] bg-white text-slate-700"
-                        }`}
-                        onClick={() => {
-                          setAuthMode("login");
-                          setAuthFeedback(null);
-                          setAuthFeedbackTone(null);
-                        }}
-                        type="button"
-                      >
-                        登录
-                      </button>
-                      <button
-                        className={`inline-flex min-h-11 flex-1 items-center justify-center rounded-full px-4 py-3 text-sm font-medium transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-500/30 ${
-                          authMode === "register"
-                            ? "bg-slate-900 text-white"
-                            : "border border-[rgba(24,48,59,0.12)] bg-white text-slate-700"
-                        }`}
-                        onClick={() => {
-                          setAuthMode("register");
-                          setAuthFeedback(null);
-                          setAuthFeedbackTone(null);
-                        }}
-                        type="button"
-                      >
-                        注册
-                      </button>
-                    </div>
-
-                    <form
-                      className="mt-6 space-y-4"
-                      onSubmit={handleAuthSubmit}
-                    >
-                      <label className="block text-sm font-medium text-slate-700">
-                        <span className="mb-2 block">邮箱</span>
-                        <input
-                          autoComplete="email"
-                          aria-invalid={hasAuthError ? true : undefined}
-                          className={`min-h-11 w-full rounded-2xl border bg-white/90 px-4 py-3 text-sm text-slate-900 outline-none transition focus:ring-4 ${
-                            hasAuthError
-                              ? "border-red-300 focus:border-red-400 focus:ring-red-100"
-                              : "border-[rgba(24,48,59,0.12)] focus:border-slate-400 focus:ring-slate-200/60"
-                          }`}
-                          onChange={(event) => {
-                            setAuthEmail(event.target.value);
-                            if (authFeedback) {
-                              setAuthFeedback(null);
-                              setAuthFeedbackTone(null);
-                            }
-                          }}
-                          placeholder="alice@example.com"
-                          type="email"
-                          value={authEmail}
-                        />
-                      </label>
-                      <label className="block text-sm font-medium text-slate-700">
-                        <span className="mb-2 block">密码</span>
-                        <input
-                          autoComplete={
-                            authMode === "login"
-                              ? "current-password"
-                              : "new-password"
-                          }
-                          aria-invalid={hasAuthError ? true : undefined}
-                          className={`min-h-11 w-full rounded-2xl border bg-white/90 px-4 py-3 text-sm text-slate-900 outline-none transition focus:ring-4 ${
-                            hasAuthError
-                              ? "border-red-300 focus:border-red-400 focus:ring-red-100"
-                              : "border-[rgba(24,48,59,0.12)] focus:border-slate-400 focus:ring-slate-200/60"
-                          }`}
-                          onChange={(event) => {
-                            setAuthPassword(event.target.value);
-                            if (authFeedback) {
-                              setAuthFeedback(null);
-                              setAuthFeedbackTone(null);
-                            }
-                          }}
-                          placeholder="至少 8 位"
-                          type="password"
-                          value={authPassword}
-                        />
-                      </label>
-
-                      {authFeedback ? (
-                        <div
-                          className={`rounded-[1.25rem] border px-4 py-3 text-sm leading-6 ${
-                            authFeedbackTone === "error"
-                              ? "border-red-200/80 bg-red-50/90 text-red-700"
-                              : "border-emerald-200/80 bg-emerald-50/90 text-emerald-700"
-                          }`}
-                          role={
-                            authFeedbackTone === "error" ? "alert" : "status"
-                          }
-                        >
-                          {authFeedback}
-                        </div>
-                      ) : null}
-
-                      <button
-                        className="inline-flex min-h-11 w-full items-center justify-center rounded-full bg-[linear-gradient(135deg,#18303b,#325869)] px-5 py-3 text-sm font-semibold text-white shadow-[0_14px_28px_rgba(24,48,59,0.2)] transition hover:translate-y-[-1px] hover:shadow-[0_18px_32px_rgba(24,48,59,0.24)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-500/40 disabled:cursor-not-allowed disabled:translate-y-0 disabled:opacity-60"
-                        disabled={isAuthSubmitting}
-                        type="submit"
-                      >
-                        {isAuthSubmitting
-                          ? "提交中..."
-                          : authMode === "login"
-                            ? "登录并刷新页面"
-                            : "注册账号"}
-                      </button>
-                    </form>
-                  </div>
+                <div className="mx-auto flex h-full w-full max-w-2xl flex-col justify-center py-8">
+                  {renderAuthPanel()}
                 </div>
               )}
             </div>
@@ -921,11 +1167,14 @@ export function ChatApp({ initialData }: { initialData: HomePageData }) {
                     value={input}
                   />
                   <div className="mt-3 flex flex-col gap-3 border-t border-[rgba(24,48,59,0.08)] pt-3 sm:flex-row sm:items-end sm:justify-between">
-                    <p className="max-w-xl text-xs leading-6 text-slate-500">
-                      {isAuthenticated
-                        ? "当前回复来自服务端模型流式输出，聊天记录会继续保存到 PostgreSQL，方便你回到同一段上下文。"
-                        : "现在这块输入区故意保留在页面里，是为了让你看到：未登录时前端可以渲染，但真正能不能聊天，仍由服务端会话决定。"}
-                    </p>
+                    <div className="max-w-2xl">
+                      <p className="text-[11px] font-semibold uppercase tracking-[0.28em] text-slate-500">
+                        Composer note
+                      </p>
+                      <p className="mt-2 text-xs leading-6 text-slate-500">
+                        {composerHint}
+                      </p>
+                    </div>
                     <button
                       className="inline-flex min-h-11 items-center justify-center rounded-full bg-[linear-gradient(135deg,#18303b,#325869)] px-5 py-3 text-sm font-semibold text-white shadow-[0_14px_28px_rgba(24,48,59,0.2)] transition hover:translate-y-[-1px] hover:shadow-[0_18px_32px_rgba(24,48,59,0.24)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-500/40 disabled:cursor-not-allowed disabled:translate-y-0 disabled:opacity-60"
                       disabled={!isAuthenticated || isLoading}

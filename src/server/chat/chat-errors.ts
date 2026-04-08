@@ -1,5 +1,5 @@
 export class UnauthorizedError extends Error {
-  constructor(message = "Authentication is required") {
+  constructor(message = "登录状态已失效，请重新登录。") {
     super(message);
     this.name = "UnauthorizedError";
   }

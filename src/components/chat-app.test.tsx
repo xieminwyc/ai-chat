@@ -36,10 +36,22 @@ describe("ChatApp", () => {
 
     render(<ChatApp initialData={createInitialData()} />);
 
-    expect(screen.getByText("A more beautiful place to think")).toBeInTheDocument();
     expect(
-      screen.getByText("把灵感、问题和暂时说不清的想法，都放进这里慢慢整理。"),
+      screen.getByText("A more beautiful place to think"),
     ).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "把灵感、问题和暂时说不清的想法，都放进这里慢慢整理。",
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText("Empty workspace"),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText("Quick start prompts"),
+    ).toBeInTheDocument();
+    expect(screen.getByText("Private by default")).toBeInTheDocument();
+    expect(screen.getByText("Thoughtful flow")).toBeInTheDocument();
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 
@@ -55,6 +67,18 @@ describe("ChatApp", () => {
 
     expect(
       screen.getByText("先登录，再开始真正的服务端聊天流程"),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText("Private workspace"),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText("为账号、会话和思考过程预留一个安静且可恢复的空间。"),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText("保留你自己的历史对话和上下文"),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText("让会话切换、刷新与恢复更加稳定"),
     ).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "发送" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "登录" })).toBeInTheDocument();
@@ -324,6 +348,48 @@ describe("ChatApp", () => {
     await user.click(screen.getByRole("button", { name: "发送" }));
 
     expect(await screen.findByText("数据库暂时不可用")).toBeInTheDocument();
+  });
+
+  it("preserves the current conversation and shows re-login actions when chat returns 401", async () => {
+    const user = userEvent.setup();
+    window.localStorage.setItem("activeChatId", "chat_1");
+
+    vi.spyOn(global, "fetch").mockResolvedValue({
+      ok: false,
+      status: 401,
+      json: async () => ({
+        error: "登录状态已失效，请重新登录。",
+      }),
+    } as Response);
+
+    render(
+      <ChatApp
+        initialData={createInitialData({
+          initialChats: [{ id: "chat_1", title: "原来的会话" }],
+          initialMessages: [
+            {
+              id: "message_1",
+              role: "assistant",
+              content: "之前已经有一条历史消息",
+              createdAt: "2026-03-24T11:20:52.268Z",
+            },
+          ],
+          initialChatId: "chat_1",
+        })}
+      />,
+    );
+
+    await user.type(screen.getByLabelText("请输入消息"), "测试消息");
+    await user.click(screen.getByRole("button", { name: "发送" }));
+
+    expect(
+      (await screen.findAllByText("登录状态已失效，请重新登录。")).length,
+    ).toBeGreaterThan(1);
+    expect(screen.getByText("之前已经有一条历史消息")).toBeInTheDocument();
+    expect(screen.getByText("测试消息")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "登录" })).toBeInTheDocument();
+    expect(window.localStorage.getItem("activeChatId")).toBeNull();
+    expect(screen.getByRole("button", { name: "发送" })).toBeDisabled();
   });
 
   it("loads the clicked conversation from the server", async () => {
