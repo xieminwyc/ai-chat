@@ -41,7 +41,7 @@ type ResolveChatActorOptions = {
   requireVerifiedUser: boolean;
 };
 
-function hasGuestSessionErrorMessage(error: unknown) {
+function hasGuestSessionErrorMessage(error: unknown): error is Error {
   if (!(error instanceof Error)) {
     return false;
   }
@@ -53,7 +53,7 @@ function hasGuestSessionErrorMessage(error: unknown) {
   ].includes(error.message);
 }
 
-function hasGuestTrialLimitReachedMessage(error: unknown) {
+function hasGuestTrialLimitReachedMessage(error: unknown): error is Error {
   return (
     error instanceof Error &&
     error.message === "Guest trial limit reached. Please register to continue."

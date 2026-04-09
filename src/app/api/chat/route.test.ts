@@ -315,6 +315,27 @@ describe("/api/chat route", () => {
     expect(data.chats).toHaveLength(1);
   });
 
+  it("returns 401 when a guest chat request references a missing guest session", async () => {
+    authService.getCurrentSession.mockResolvedValue(null);
+    guestService.getCurrentGuestSession.mockRejectedValue(
+      new Error("Guest session not found."),
+    );
+
+    const response = await GET(
+      new Request(`http://localhost:3000/api/chat?chatId=${CHAT_ID}`, {
+        headers: {
+          cookie: "ai-chat-guest=missing-guest-token",
+        },
+      }),
+    );
+    const data = await response.json();
+
+    expect(response.status).toBe(401);
+    expect(data).toEqual({
+      error: "Guest session not found.",
+    });
+  });
+
   it("creates a guest-owned chat and writes the guest cookie when posting anonymously", async () => {
     authService.getCurrentSession.mockResolvedValue(null);
     guestService.getOrCreateGuestSession.mockResolvedValue({
