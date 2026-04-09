@@ -157,33 +157,45 @@ mergedAt DateTime?
 
 ```mermaid
 flowchart TD
-  A["GET /"] --> B["page.tsx"]
+  A["用户打开首页 /"] --> B["app/page.tsx"]
   B --> C["getHomePageData()"]
-  C --> D["读取 user session cookie"]
-  D --> E{"有没有 authenticated user?"}
-  E -- 没有 --> F["读取 auth-shell cookie"]
-  F --> G{"auth-shell cookie = 1 ?"}
-  G -- 是 --> H["返回 signed-out auth shell"]
-  G -- 否 --> I["继续读取 guest cookie"]
-  E -- 有 --> G{"emailVerifiedAt 是否存在?"}
-  G -- 否 --> J["mergeCandidate = null"]
-  G -- 是 --> K["读取 guest cookie"]
-  K --> L["getMergeableGuestSession()"]
-  L --> M{"guest 还 active 且未 merged?"}
-  M -- 否 --> J
-  M -- 是 --> N["返回 mergeCandidate"]
-  I --> O{"有没有 guest cookie?"}
-  O -- 没有 --> P["返回 guest preview"]
-  O -- 有 --> Q["getCurrentGuestSession()"]
-  Q --> R{"guest session 还有效吗?"}
-  R -- 否 --> P
-  R -- 是 --> S["返回 guest workspace"]
-  H --> T["返回 HomePageData"]
-  J --> T
-  N --> T
-  P --> T
-  S --> T
-  T --> U["ChatApp 决定显示 merge prompt / guest / auth shell"]
+  C --> D["先读 session cookie"]
+  D --> E{"已经登录了吗？"}
+
+  E -- 是 --> F["按 user 身份加载聊天列表 / 当前消息"]
+  F --> G{"邮箱已经验证了吗？"}
+  G -- 否 --> H["mergeCandidate = null"]
+  G -- 是 --> I["再读 guest cookie"]
+  I --> J["getMergeableGuestSession()"]
+  J --> K{"这个 guest 还有效、没过期、没被合并吗？"}
+  K -- 是 --> L["带上 mergeCandidate"]
+  K -- 否 --> H
+  H --> M["返回 authenticated user 数据"]
+  L --> M
+
+  E -- 否 --> N["读 auth-shell cookie"]
+  N --> O{"auth-shell = 1 吗？"}
+  O -- 是 --> P["返回 signed-out auth shell 数据"]
+  O -- 否 --> Q["读 guest cookie"]
+  Q --> R{"有 guest cookie 吗？"}
+  R -- 否 --> S["返回 guest preview 数据"]
+  R -- 是 --> T["getCurrentGuestSession()"]
+  T --> U{"guest session 还有效吗？"}
+  U -- 否 --> S
+  U -- 是 --> V["按 guest 身份加载聊天列表 / 当前消息"]
+  V --> W["返回 guest workspace 数据"]
+
+  M --> X["ChatApp 根据 HomePageData 渲染首页"]
+  P --> X
+  S --> X
+  W --> X
+
+  X --> Y["可能显示：
+1. 已登录用户工作台
+2. 已登录 + merge prompt
+3. signed-out auth shell
+4. guest preview
+5. guest workspace"]
 ```
 
 这里最重要的一点是：
@@ -197,11 +209,29 @@ flowchart TD
 
 > “这个浏览器里，服务端认可的可合并游客历史提示”
 
-而现在首页未登录时，也不再只是“guest 或没有 guest”这么简单了。
+再换成更白话一点的话，首页现在其实会分成 5 种状态：
 
-它还会多判断一句：
+1. 已登录用户工作台
+   这是最普通的账号态，直接按 user 身份加载聊天数据。
+2. 已登录用户工作台 + merge prompt
+   用户已经登录且邮箱已验证，同时浏览器里还有一段仍然有效的 guest 历史，所以前端会多显示一个“要不要合并”的提示。
+3. signed-out auth shell
+   用户当前没登录，但浏览器里有 `ai-chat-auth-shell=1`，所以首页优先回到登录 / 注册入口，不再继续走 guest 恢复逻辑。
+4. guest preview
+   用户没登录，也没有可恢复的 guest session，这时首页只给一个游客预览态，不提前创建新的 guest session。
+5. guest workspace
+   用户没登录，但浏览器里有有效的 guest cookie，对应的 guest session 还活着，所以首页会按 guest 身份把聊天历史恢复出来。
 
-> 这个浏览器是不是被明确要求“先回登录 / 注册入口”？
+这里最容易绕的一点是：
+
+- “已登录但邮箱还没验证”
+- 和 “没登录但被 auth-shell cookie 引导回登录入口”
+
+这两个不是同一种状态。
+
+前者还是已登录用户，只是 `mergeCandidate = null`。
+
+后者则是根本没登录，只是首页被明确要求优先显示登录 / 注册入口。
 
 ---
 
@@ -209,22 +239,28 @@ flowchart TD
 
 ```mermaid
 flowchart TD
-  A["ChatApp.handleMergeGuestHistory"] --> B["POST /api/guest/merge"]
-  B --> C["读取 auth cookie"]
-  C --> D["getCurrentSession()"]
-  D --> E["requireVerifiedUser()"]
-  E --> F["读取 guest cookie"]
-  F --> G["getMergeableGuestSession()"]
-  G --> H["mergeGuestSessionIntoUserAccount(...)"]
-  H --> I["repository transaction"]
-  I --> J["chat.userId = 当前 userId"]
-  J --> K["chat.guestSessionId = null"]
-  K --> L["guestSession.mergedAt = now"]
-  L --> M["清空旧 guest cookie"]
-  M --> N["写入 auth-shell cookie = 1"]
-  N --> O["返回 mergedChatCount"]
-  O --> P["ChatApp 刷新 chat list 并收起 prompt"]
+  A["用户点了『合并当前游客历史』"] --> B["ChatApp.handleMergeGuestHistory()"]
+  B --> C["POST /api/guest/merge"]
+  C --> D["读 session cookie"]
+  D --> E["getCurrentSession()"]
+  E --> F["requireVerifiedUser()"]
+  F --> G["读 guest cookie"]
+  G --> H["getMergeableGuestSession()"]
+  H --> I["mergeGuestSessionIntoUserAccount()"]
+  I --> J["repository transaction 开始"]
+  J --> K["把这批 chat 改挂到当前 user 下面"]
+  K --> L["chat.userId = 当前 userId"]
+  L --> M["chat.guestSessionId = null"]
+  M --> N["guestSession.mergedAt = now"]
+  N --> O["route 清空旧 guest cookie"]
+  O --> P["route 写入 auth-shell cookie = 1"]
+  P --> Q["返回 mergedChatCount"]
+  Q --> R["ChatApp 刷新 chat list，并收起 merge prompt"]
 ```
+
+把它翻成一句人话就是：
+
+> 前端发起一次 merge 请求，服务端先确认“你是不是已验证用户”，再确认“浏览器里这段 guest 历史还能不能接”，确认都没问题后，才真正去改数据库 ownership，最后顺手把浏览器后续入口也切到 auth shell 规则。
 
 这里真正要盯住的顺序是：
 
@@ -279,18 +315,20 @@ route 成功返回前，还会做两件事：
 
 ```mermaid
 flowchart TD
-  A["merge 成功"] --> B["guest cookie 被清空"]
-  B --> C["auth-shell cookie = 1"]
-  C --> D["用户退出登录"]
-  D --> E["getHomePageData / auth-session"]
-  E --> F{"auth-shell cookie = 1 ?"}
-  F -- 是 --> G["返回登录 / 注册入口"]
-  F -- 否 --> H["再去判断 guest cookie"]
+  A["merge 成功"] --> B["旧 guest cookie 被清空"]
+  B --> C["auth-shell cookie 被写成 1"]
+  C --> D["之后用户如果退出登录"]
+  D --> E["首页再次执行 getHomePageData()"]
+  E --> F["先看 session：现在已经没有登录态了"]
+  F --> G["再看 auth-shell cookie"]
+  G --> H{"auth-shell = 1 吗？"}
+  H -- 是 --> I["直接返回 signed-out auth shell"]
+  H -- 否 --> J["才会继续判断 guest cookie"]
 ```
 
 这一步很容易被误会成：
 
-- “是不是只要 `mergedAt` 有值就够了？”
+- “是不是只要数据库里 `mergedAt` 有值就够了？”
 
 现在真实情况是两层都在收口：
 
@@ -304,7 +342,7 @@ flowchart TD
 所以现在不只是“后面哪怕浏览器还带着 cookie 也会失效”，而是：
 
 - 旧 guest session 本身不可用了
-- 浏览器也不会再立刻用它去重建下一轮 guest 流程
+- 浏览器入口也被明确改成“先回登录 / 注册入口”
 
 这就是现在这套组合的真正意义：
 

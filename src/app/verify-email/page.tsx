@@ -6,6 +6,9 @@ export default async function VerifyEmailPage({
   searchParams: Promise<{ token?: string }>;
 }) {
   const { token } = await searchParams;
+  let isSuccess = false;
+  let message = "Verification failed";
+  let email = "";
 
   if (!token) {
     return (
@@ -18,20 +21,25 @@ export default async function VerifyEmailPage({
 
   try {
     const user = await verifyEmailToken(token);
-
-    return (
-      <main className="mx-auto flex min-h-screen max-w-xl flex-col items-center justify-center gap-3 px-6 text-center">
-        <h1 className="text-2xl font-semibold">邮箱验证成功</h1>
-        <p>{user.email}</p>
-        <p>现在可以回到应用继续登录和聊天。</p>
-      </main>
-    );
+    isSuccess = true;
+    email = user.email;
   } catch (error) {
-    return (
-      <main className="mx-auto flex min-h-screen max-w-xl flex-col items-center justify-center gap-3 px-6 text-center">
-        <h1 className="text-2xl font-semibold">邮箱验证失败</h1>
-        <p>{error instanceof Error ? error.message : "Verification failed"}</p>
-      </main>
-    );
+    message = error instanceof Error ? error.message : "Verification failed";
   }
+
+  return (
+    <main className="mx-auto flex min-h-screen max-w-xl flex-col items-center justify-center gap-3 px-6 text-center">
+      <h1 className="text-2xl font-semibold">
+        {isSuccess ? "邮箱验证成功" : "邮箱验证失败"}
+      </h1>
+      {isSuccess ? (
+        <>
+          <p>{email}</p>
+          <p>现在可以回到应用继续登录和聊天。</p>
+        </>
+      ) : (
+        <p>{message}</p>
+      )}
+    </main>
+  );
 }
