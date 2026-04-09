@@ -26,6 +26,16 @@
   - `docs/superpowers/specs/2026-04-02-auth-and-guest-trial-design.md`
   - 重点推进 `游客试用 -> 额度限制 -> 历史合并`
 
+## 后续校正（2026-04-09）
+
+- guest trial 第一轮实现完成后，又补了一次边界校正：
+  - 首页匿名访问只返回 `guest preview`，不再提前创建 `GuestSession`
+  - 真正的 guest session 创建，延后到能写 cookie 的 route 中执行
+  - 最常见的触发点是第一次 `POST /api/chat`
+- 这样做的原因是：
+  - 避免“只是路过首页”的访问在数据库里堆出大量未绑定浏览器的 guest session
+  - 让 guest 身份创建和 cookie 写回发生在同一条可验证链路里
+
 ## 背景
 
 当前项目已经不是单纯页面练习，而是已经打通了这些能力：

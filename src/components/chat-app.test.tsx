@@ -10,6 +10,7 @@ function createInitialData(
   overrides: Partial<HomePageData> = {},
 ): HomePageData {
   return {
+    viewerKind: "user",
     isAuthenticated: true,
     currentUser: {
       id: "user_1",
@@ -17,11 +18,28 @@ function createInitialData(
       createdAt: "2026-04-08T01:00:00.000Z",
       updatedAt: "2026-04-08T01:00:00.000Z",
     },
+    guestSession: null,
     initialChats: [],
     initialMessages: [],
     initialChatId: null,
     ...overrides,
   };
+}
+
+function createGuestData(
+  overrides: Partial<HomePageData> = {},
+): HomePageData {
+  return createInitialData({
+    viewerKind: "guest",
+    isAuthenticated: false,
+    currentUser: null,
+    guestSession: {
+      id: "guest_1",
+      trialMessageCount: 0,
+      messageLimit: 3,
+    },
+    ...overrides,
+  });
 }
 
 describe("ChatApp", () => {
@@ -59,8 +77,10 @@ describe("ChatApp", () => {
     render(
       <ChatApp
         initialData={createInitialData({
+          viewerKind: "user",
           isAuthenticated: false,
           currentUser: null,
+          guestSession: null,
         })}
       />,
     );
@@ -85,6 +105,236 @@ describe("ChatApp", () => {
     expect(screen.getByRole("button", { name: "注册" })).toBeInTheDocument();
   });
 
+  it("renders a usable guest workspace instead of forcing the auth shell", () => {
+    render(
+      <ChatApp
+        initialData={createGuestData({
+          guestSession: {
+            id: "guest_1",
+            trialMessageCount: 1,
+            messageLimit: 3,
+          },
+        })}
+      />,
+    );
+
+    expect((screen.getAllByText("游客试用还剩 2 次")).length).toBeGreaterThan(0);
+    expect(
+      screen.queryByText("先登录，再开始真正的服务端聊天流程"),
+    ).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "发送" })).toBeEnabled();
+  });
+
+  it("keeps the guest workspace available before a cookie-backed guest session exists", () => {
+    render(
+      <ChatApp
+        initialData={createGuestData({
+          guestSession: null,
+          initialChats: [],
+          initialMessages: [],
+        })}
+      />,
+    );
+
+    expect((screen.getAllByText("游客试用还剩 3 次")).length).toBeGreaterThan(0);
+    expect(
+      screen.queryByText("先登录，再开始真正的服务端聊天流程"),
+    ).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "发送" })).toBeEnabled();
+  });
+
+  it("lets a guest send messages before the quota is exhausted", async () => {
+    const user = userEvent.setup();
+    let chatListRequestCount = 0;
+    let postBody: string | null = null;
+
+    vi.spyOn(global, "fetch").mockImplementation((input, init) => {
+      const url = String(input);
+
+      if (url === "/api/chat" && init?.method === "POST") {
+        postBody = String(init.body ?? "");
+        const stream = new ReadableStream({
+          start(controller) {
+            controller.enqueue(new TextEncoder().encode("游客回复"));
+            controller.close();
+          },
+        });
+
+        return Promise.resolve(
+          new Response(stream, {
+            status: 200,
+            headers: {
+              "x-chat-id": "chat_guest_1",
+            },
+          }),
+        );
+      }
+
+      if (url === "/api/chat") {
+        chatListRequestCount += 1;
+
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({
+            chats: [
+              {
+                id: "chat_guest_1",
+                title: "游客会话",
+                updatedAt: "2026-03-25T03:06:31.474Z",
+              },
+            ],
+          }),
+        } as Response);
+      }
+
+      throw new Error(`unexpected fetch: ${url}`);
+    });
+
+    render(<ChatApp initialData={createGuestData()} />);
+
+    await user.type(screen.getByLabelText("请输入消息"), "游客测试消息");
+    await user.click(screen.getByRole("button", { name: "发送" }));
+
+    expect(await screen.findByText("游客测试消息")).toBeInTheDocument();
+    expect(await screen.findByText("游客回复")).toBeInTheDocument();
+    expect((screen.getAllByText("游客试用还剩 2 次")).length).toBeGreaterThan(0);
+    expect(postBody).toBe(JSON.stringify({ message: "游客测试消息" }));
+    expect(chatListRequestCount).toBe(1);
+  });
+
+  it("creates local guest UI state after the first anonymous message succeeds", async () => {
+    const user = userEvent.setup();
+
+    vi.spyOn(global, "fetch").mockImplementation((input, init) => {
+      const url = String(input);
+
+      if (url === "/api/chat" && init?.method === "POST") {
+        const stream = new ReadableStream({
+          start(controller) {
+            controller.enqueue(new TextEncoder().encode("游客回复"));
+            controller.close();
+          },
+        });
+
+        return Promise.resolve(
+          new Response(stream, {
+            status: 200,
+            headers: {
+              "x-chat-id": "chat_guest_1",
+            },
+          }),
+        );
+      }
+
+      if (url === "/api/chat") {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({
+            chats: [
+              {
+                id: "chat_guest_1",
+                title: "游客会话",
+                updatedAt: "2026-03-25T03:06:31.474Z",
+              },
+            ],
+          }),
+        } as Response);
+      }
+
+      throw new Error(`unexpected fetch: ${url}`);
+    });
+
+    render(
+      <ChatApp
+        initialData={createGuestData({
+          guestSession: null,
+        })}
+      />,
+    );
+
+    await user.type(screen.getByLabelText("请输入消息"), "第一次游客消息");
+    await user.click(screen.getByRole("button", { name: "发送" }));
+
+    expect(await screen.findByText("游客回复")).toBeInTheDocument();
+    expect((screen.getAllByText("游客试用还剩 2 次")).length).toBeGreaterThan(0);
+  });
+
+  it("keeps guest history visible and disables send when the quota is exhausted", () => {
+    render(
+      <ChatApp
+        initialData={createGuestData({
+          guestSession: {
+            id: "guest_1",
+            trialMessageCount: 3,
+            messageLimit: 3,
+          },
+          initialMessages: [
+            {
+              id: "message_1",
+              role: "assistant",
+              content: "游客历史消息",
+              createdAt: "2026-03-24T11:20:52.268Z",
+            },
+          ],
+        })}
+      />,
+    );
+
+    expect(screen.getByText("游客历史消息")).toBeInTheDocument();
+    expect(
+      (screen.getAllByText("游客试用次数已用完，注册后可继续聊天并保存历史"))
+        .length,
+    ).toBeGreaterThan(0);
+    expect(screen.getByRole("button", { name: "发送" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "登录" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "注册" })).toBeInTheDocument();
+  });
+
+  it("shows the guest upgrade CTA instead of the session-expired UI when guest quota is rejected", async () => {
+    const user = userEvent.setup();
+
+    vi.spyOn(global, "fetch").mockResolvedValue({
+      ok: false,
+      status: 403,
+      json: async () => ({
+        error: "Guest trial limit reached. Please register to continue.",
+      }),
+    } as Response);
+
+    render(
+      <ChatApp
+        initialData={createGuestData({
+          guestSession: {
+            id: "guest_1",
+            trialMessageCount: 2,
+            messageLimit: 3,
+          },
+          initialMessages: [
+            {
+              id: "message_1",
+              role: "assistant",
+              content: "还留着的游客历史",
+              createdAt: "2026-03-24T11:20:52.268Z",
+            },
+          ],
+        })}
+      />,
+    );
+
+    await user.type(screen.getByLabelText("请输入消息"), "最后一次游客消息");
+    await user.click(screen.getByRole("button", { name: "发送" }));
+
+    expect(await screen.findByText("还留着的游客历史")).toBeInTheDocument();
+    expect(
+      (screen.getAllByText("游客试用次数已用完，注册后可继续聊天并保存历史"))
+        .length,
+    ).toBeGreaterThan(0);
+    expect(
+      screen.queryByText("登录状态已失效，请重新登录。"),
+    ).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "发送" })).toBeDisabled();
+  });
+
   it("submits the register form and shows success feedback", async () => {
     const user = userEvent.setup();
 
@@ -101,8 +351,10 @@ describe("ChatApp", () => {
     render(
       <ChatApp
         initialData={createInitialData({
+          viewerKind: "user",
           isAuthenticated: false,
           currentUser: null,
+          guestSession: null,
         })}
       />,
     );
@@ -145,8 +397,10 @@ describe("ChatApp", () => {
     render(
       <ChatApp
         initialData={createInitialData({
+          viewerKind: "user",
           isAuthenticated: false,
           currentUser: null,
+          guestSession: null,
         })}
       />,
     );

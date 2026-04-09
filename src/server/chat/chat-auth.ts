@@ -1,4 +1,5 @@
 import { ForbiddenError, UnauthorizedError } from "@/server/chat/chat-errors";
+import type { ChatOwner } from "@/server/chat/chat-types";
 
 type MinimalUser = {
   id: string;
@@ -8,7 +9,8 @@ type MinimalUser = {
 type MinimalChat = {
   id: string;
   title: string;
-  userId: string;
+  userId: string | null;
+  guestSessionId: string | null;
 };
 
 export { ForbiddenError, UnauthorizedError };
@@ -21,8 +23,19 @@ export function requireAuthenticatedUser(user: MinimalUser | null) {
   return user;
 }
 
-export function assertChatOwner(chat: MinimalChat | null, userId: string) {
-  if (!chat || chat.userId !== userId) {
+export function assertChatOwner(chat: MinimalChat | null, owner: ChatOwner) {
+  if (!chat) {
+    throw new ForbiddenError();
+  }
+
+  if (owner.kind === "user" && chat.userId !== owner.userId) {
+    throw new ForbiddenError();
+  }
+
+  if (
+    owner.kind === "guest" &&
+    chat.guestSessionId !== owner.guestSessionId
+  ) {
     throw new ForbiddenError();
   }
 

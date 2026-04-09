@@ -35,10 +35,10 @@ describe("chat-repository", () => {
     vi.clearAllMocks();
   });
 
-  it("loads chats for the sidebar ordered by updatedAt descending", async () => {
+  it("loads user chats for the sidebar ordered by updatedAt descending", async () => {
     prisma.chat.findMany.mockResolvedValue([]);
 
-    await listChats("user_1");
+    await listChats({ kind: "user", userId: "user_1" });
 
     expect(prisma.chat.findMany).toHaveBeenCalledWith({
       where: { userId: "user_1" },
@@ -52,15 +52,32 @@ describe("chat-repository", () => {
     });
   });
 
+  it("loads guest chats for the sidebar ordered by updatedAt descending", async () => {
+    prisma.chat.findMany.mockResolvedValue([]);
+
+    await listChats({ kind: "guest", guestSessionId: "guest_1" });
+
+    expect(prisma.chat.findMany).toHaveBeenCalledWith({
+      where: { guestSessionId: "guest_1" },
+      orderBy: { updatedAt: "desc" },
+      select: {
+        id: true,
+        title: true,
+        createdAt: true,
+        updatedAt: true,
+      },
+    });
+  });
+
   it("loads conversation messages in chronological order for the model", async () => {
     prisma.message.findMany.mockResolvedValue([]);
 
-    await getConversationMessages("chat_1", "user_1");
+    await getConversationMessages("chat_1", { kind: "guest", guestSessionId: "guest_1" });
 
     expect(prisma.message.findMany).toHaveBeenCalledWith({
       where: {
         chatId: "chat_1",
-        chat: { userId: "user_1" },
+        chat: { guestSessionId: "guest_1" },
       },
       orderBy: { createdAt: "asc" },
       select: {
@@ -95,12 +112,14 @@ describe("chat-repository", () => {
     prisma.chat.findFirst.mockResolvedValue({
       id: "chat_1",
       title: "旧标题",
-      userId: "user_1",
+      userId: null,
+      guestSessionId: "guest_1",
     });
     prisma.chat.create.mockResolvedValue({
       id: "chat_new",
       title: "测试标题",
-      userId: "user_1",
+      userId: null,
+      guestSessionId: "guest_1",
     });
     prisma.message.findMany.mockResolvedValue([
       {
@@ -112,9 +131,9 @@ describe("chat-repository", () => {
     ]);
     prisma.message.create.mockResolvedValue({});
 
-    await getChatById("chat_1", "user_1");
-    await createChat("测试标题", "user_1");
-    await getChatMessages("chat_1", "user_1");
+    await getChatById("chat_1", { kind: "guest", guestSessionId: "guest_1" });
+    await createChat("测试标题", { kind: "guest", guestSessionId: "guest_1" });
+    await getChatMessages("chat_1", { kind: "guest", guestSessionId: "guest_1" });
     await createMessage({
       chatId: "chat_1",
       role: "assistant",
@@ -124,26 +143,28 @@ describe("chat-repository", () => {
     expect(prisma.chat.findFirst).toHaveBeenCalledWith({
       where: {
         id: "chat_1",
-        userId: "user_1",
+        guestSessionId: "guest_1",
       },
       select: {
         id: true,
         title: true,
         userId: true,
+        guestSessionId: true,
       },
     });
     expect(prisma.chat.create).toHaveBeenCalledWith({
-      data: { title: "测试标题", userId: "user_1" },
+      data: { title: "测试标题", guestSessionId: "guest_1" },
       select: {
         id: true,
         title: true,
         userId: true,
+        guestSessionId: true,
       },
     });
     expect(prisma.message.findMany).toHaveBeenCalledWith({
       where: {
         chatId: "chat_1",
-        chat: { userId: "user_1" },
+        chat: { guestSessionId: "guest_1" },
       },
       orderBy: { createdAt: "asc" },
       select: {

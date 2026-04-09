@@ -25,10 +25,21 @@ export type ChatRenameResult = {
   updatedAt: Date;
 };
 
+export type ChatOwner =
+  | {
+      kind: "user";
+      userId: string;
+    }
+  | {
+      kind: "guest";
+      guestSessionId: string;
+    };
+
 export type ChatRecord = {
   id: string;
   title: string;
-  userId: string;
+  userId: string | null;
+  guestSessionId: string | null;
 };
 
 export type CreateMessageInput = {

@@ -30,8 +30,9 @@ describe("chat-auth", () => {
           id: "chat_1",
           title: "测试会话",
           userId: "user_2",
+          guestSessionId: null,
         },
-        "user_1",
+        { kind: "user", userId: "user_1" },
       ),
     ).toThrow(ForbiddenError);
   });
@@ -43,8 +44,37 @@ describe("chat-auth", () => {
           id: "chat_1",
           title: "测试会话",
           userId: "user_1",
+          guestSessionId: null,
         },
-        "user_1",
+        { kind: "user", userId: "user_1" },
+      ),
+    ).not.toThrow();
+  });
+
+  it("rejects guest access to chats from another guest session", () => {
+    expect(() =>
+      assertChatOwner(
+        {
+          id: "chat_1",
+          title: "测试会话",
+          userId: null,
+          guestSessionId: "guest_2",
+        },
+        { kind: "guest", guestSessionId: "guest_1" },
+      ),
+    ).toThrow(ForbiddenError);
+  });
+
+  it("allows access when the chat belongs to the current guest session", () => {
+    expect(() =>
+      assertChatOwner(
+        {
+          id: "chat_1",
+          title: "测试会话",
+          userId: null,
+          guestSessionId: "guest_1",
+        },
+        { kind: "guest", guestSessionId: "guest_1" },
       ),
     ).not.toThrow();
   });

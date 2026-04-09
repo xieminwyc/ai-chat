@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import type {
   ChatMessage,
+  ChatOwner,
   ChatRecord,
   ChatRenameResult,
   ChatSummary,
@@ -8,9 +9,15 @@ import type {
   CreateMessageInput,
 } from "@/server/chat/chat-types";
 
-export async function listChats(userId: string): Promise<ChatSummary[]> {
+function buildOwnerWhere(owner: ChatOwner) {
+  return owner.kind === "user"
+    ? { userId: owner.userId }
+    : { guestSessionId: owner.guestSessionId };
+}
+
+export async function listChats(owner: ChatOwner): Promise<ChatSummary[]> {
   return prisma.chat.findMany({
-    where: { userId },
+    where: buildOwnerWhere(owner),
     orderBy: { updatedAt: "desc" },
     select: {
       id: true,
@@ -23,12 +30,12 @@ export async function listChats(userId: string): Promise<ChatSummary[]> {
 
 export async function getChatMessages(
   chatId: string,
-  userId: string,
+  owner: ChatOwner,
 ): Promise<ChatMessage[]> {
   return prisma.message.findMany({
     where: {
       chatId,
-      chat: { userId },
+      chat: buildOwnerWhere(owner),
     },
     orderBy: { createdAt: "asc" },
     select: {
@@ -42,12 +49,12 @@ export async function getChatMessages(
 
 export async function getConversationMessages(
   chatId: string,
-  userId: string,
+  owner: ChatOwner,
 ): Promise<ConversationMessage[]> {
   return prisma.message.findMany({
     where: {
       chatId,
-      chat: { userId },
+      chat: buildOwnerWhere(owner),
     },
     orderBy: { createdAt: "asc" },
     select: {
@@ -59,31 +66,36 @@ export async function getConversationMessages(
 
 export async function getChatById(
   chatId: string,
-  userId: string,
+  owner: ChatOwner,
 ): Promise<ChatRecord | null> {
   return prisma.chat.findFirst({
     where: {
       id: chatId,
-      userId,
+      ...buildOwnerWhere(owner),
     },
     select: {
       id: true,
       title: true,
       userId: true,
+      guestSessionId: true,
     },
   });
 }
 
 export async function createChat(
   title: string,
-  userId: string,
+  owner: ChatOwner,
 ): Promise<ChatRecord> {
   return prisma.chat.create({
-    data: { title, userId },
+    data: {
+      title,
+      ...buildOwnerWhere(owner),
+    },
     select: {
       id: true,
       title: true,
       userId: true,
+      guestSessionId: true,
     },
   });
 }

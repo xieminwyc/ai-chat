@@ -3,7 +3,13 @@ import { cookies } from "next/headers";
 import { getCurrentSession } from "@/server/auth/auth-service";
 import { getSessionCookieName } from "@/server/auth/session";
 import { chatQuerySchema } from "@/server/chat/chat-schemas";
+import type { ChatOwner } from "@/server/chat/chat-types";
 import { listChatSummaries, loadChatMessages } from "@/server/chat/chat-service";
+import {
+  getCurrentGuestSession,
+  GUEST_MESSAGE_LIMIT,
+} from "@/server/guest/guest-service";
+import { getGuestCookieName } from "@/server/guest/guest-session";
 
 export type HomePageUser = {
   id: string;
@@ -26,9 +32,17 @@ export type HomePageChatMessage = {
   createdAt: string;
 };
 
+export type ViewerKind = "user" | "guest";
+
 export type HomePageData = {
+  viewerKind: ViewerKind;
   isAuthenticated: boolean;
   currentUser: HomePageUser | null;
+  guestSession: {
+    id: string;
+    trialMessageCount: number;
+    messageLimit: number;
+  } | null;
   initialChats: HomePageChatSummary[];
   initialMessages: HomePageChatMessage[];
   initialChatId: string | null;
@@ -80,13 +94,63 @@ function serializeMessage(message: {
   };
 }
 
-function createSignedOutHomePageData(): HomePageData {
+function createGuestHomePageData(
+  guestSession:
+    | {
+        id: string;
+        trialMessageCount: number;
+      }
+    | null,
+  initialChats: HomePageChatSummary[] = [],
+  initialMessages: HomePageChatMessage[] = [],
+  initialChatId: string | null = null,
+): HomePageData {
   return {
+    viewerKind: "guest",
     isAuthenticated: false,
     currentUser: null,
-    initialChats: [],
-    initialMessages: [],
-    initialChatId: null,
+    guestSession: guestSession
+      ? {
+          id: guestSession.id,
+          trialMessageCount: guestSession.trialMessageCount,
+          messageLimit: GUEST_MESSAGE_LIMIT,
+        }
+      : null,
+    initialChats,
+    initialMessages,
+    initialChatId,
+  };
+}
+
+function getSelectedChatId(
+  selectedChatId: string | undefined,
+  initialChats: HomePageChatSummary[],
+) {
+  const selectedChatResult = chatQuerySchema.safeParse({
+    chatId: selectedChatId,
+  });
+
+  return selectedChatResult.success &&
+    selectedChatResult.data.chatId &&
+    initialChats.some((chat) => chat.id === selectedChatResult.data.chatId)
+    ? selectedChatResult.data.chatId
+    : null;
+}
+
+async function loadInitialChatState(
+  owner: ChatOwner,
+  selectedChatId: string | undefined,
+) {
+  const initialChats = (await listChatSummaries(owner)).map(serializeChat);
+  const nextChatId = getSelectedChatId(selectedChatId, initialChats);
+  const initialMessages = nextChatId
+    ? (await loadChatMessages(owner, nextChatId)).map(serializeMessage)
+    : [];
+
+  return {
+    initialChats,
+    initialMessages,
+    initialChatId: nextChatId,
   };
 }
 
@@ -98,35 +162,40 @@ export async function getHomePageData({
     cookieStore.get(getSessionCookieName())?.value ?? null;
   const session = await getCurrentSession(sessionToken);
 
-  if (!session) {
-    return createSignedOutHomePageData();
+  if (session) {
+    const owner: ChatOwner = { kind: "user", userId: session.user.id };
+    const initialState = await loadInitialChatState(owner, selectedChatId);
+
+    return {
+      viewerKind: "user",
+      isAuthenticated: true,
+      currentUser: serializeUser(session.user),
+      guestSession: null,
+      ...initialState,
+    };
   }
 
-  const initialChats = (await listChatSummaries(session.user.id)).map(
-    serializeChat,
-  );
+  const guestToken = cookieStore.get(getGuestCookieName())?.value ?? null;
+  if (!guestToken) {
+    return createGuestHomePageData(null);
+  }
 
-  const selectedChatResult = chatQuerySchema.safeParse({
-    chatId: selectedChatId,
-  });
-  const nextChatId =
-    selectedChatResult.success &&
-    selectedChatResult.data.chatId &&
-    initialChats.some((chat) => chat.id === selectedChatResult.data.chatId)
-      ? selectedChatResult.data.chatId
-      : null;
+  const guestSession = await getCurrentGuestSession(guestToken);
 
-  // 这里先用“chatId 是否出现在当前用户的聊天列表里”做一道服务端兜底，
-  // 避免把别人的 chatId 直接拿去加载消息。
-  const initialMessages = nextChatId
-    ? (await loadChatMessages(session.user.id, nextChatId)).map(serializeMessage)
-    : [];
+  if (!guestSession) {
+    return createGuestHomePageData(null);
+  }
 
-  return {
-    isAuthenticated: true,
-    currentUser: serializeUser(session.user),
-    initialChats,
-    initialMessages,
-    initialChatId: nextChatId,
+  const owner: ChatOwner = {
+    kind: "guest",
+    guestSessionId: guestSession.id,
   };
+  const initialState = await loadInitialChatState(owner, selectedChatId);
+
+  return createGuestHomePageData(
+    guestSession,
+    initialState.initialChats,
+    initialState.initialMessages,
+    initialState.initialChatId,
+  );
 }

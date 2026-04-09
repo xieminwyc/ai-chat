@@ -50,6 +50,10 @@ const authBenefits = [
 ];
 
 const sessionExpiredMessage = "登录状态已失效，请重新登录。";
+const guestTrialLimitMessage =
+  "Guest trial limit reached. Please register to continue.";
+const guestUpgradeMessage = "游客试用次数已用完，注册后可继续聊天并保存历史";
+const defaultGuestMessageLimit = 3;
 
 function formatChatUpdatedAt(updatedAt?: string) {
   if (!updatedAt) {
@@ -96,10 +100,12 @@ type SignedOutStateOptions = {
 export function ChatApp({ initialData }: { initialData: HomePageData }) {
   // 这些 state 不再靠首屏 useEffect 去拉接口初始化，而是直接吃服务端传下来的 bootstrap 数据。
   const [input, setInput] = useState("");
+  const [viewerKind, setViewerKind] = useState(initialData.viewerKind);
   const [isAuthenticated, setIsAuthenticated] = useState(
     initialData.isAuthenticated,
   );
   const [currentUser, setCurrentUser] = useState(initialData.currentUser);
+  const [guestSession, setGuestSession] = useState(initialData.guestSession);
   const [chats, setChats] = useState<ChatSummary[]>(initialData.initialChats);
   const [messages, setMessages] = useState<ChatMessage[]>(
     initialData.initialMessages,
@@ -124,19 +130,42 @@ export function ChatApp({ initialData }: { initialData: HomePageData }) {
   const activeChatUpdatedAt = formatChatUpdatedAt(activeChat?.updatedAt);
   const hasMessages = messages.length > 0;
   const hasAuthError = authFeedbackTone === "error";
+  const isGuest = viewerKind === "guest";
+  const isAuthLocked = !isAuthenticated && viewerKind !== "guest";
+  const guestMessagesUsed = guestSession?.trialMessageCount ?? 0;
+  const guestMessageLimit = guestSession?.messageLimit ?? defaultGuestMessageLimit;
+  const guestMessagesRemaining = isGuest
+    ? Math.max(0, guestMessageLimit - guestMessagesUsed)
+    : 0;
+  const isGuestQuotaExhausted = isGuest && guestMessagesRemaining === 0;
+  const guestStatusLabel = isGuest
+    ? isGuestQuotaExhausted
+      ? guestUpgradeMessage
+      : `游客试用还剩 ${guestMessagesRemaining} 次`
+    : null;
   const currentUserLabel = currentUser?.email ?? "已登录用户";
   const savedSessionCount = String(chats.length).padStart(2, "0");
-  const workspaceModeLabel = isAuthenticated ? "Account synced" : "Guest preview";
+  const workspaceModeLabel = isAuthenticated
+    ? "Account synced"
+    : isGuest
+      ? "Guest trial"
+      : "Recovery needed";
   const workspaceStateLabel = error
     ? "Needs attention"
     : isLoading
       ? "Reply streaming"
+      : isGuestQuotaExhausted
+        ? "Read only"
       : hasMessages
         ? "Conversation active"
         : "Quiet and ready";
   const composerHint = isAuthenticated
     ? "当前回复来自服务端模型流式输出，聊天记录会继续保存到 PostgreSQL，方便你回到同一段上下文。"
-    : "输入区仍然保留在工作台里，但真正能不能继续发送、保存和恢复会话，仍由服务端身份状态决定。";
+    : isGuestQuotaExhausted
+      ? guestUpgradeMessage
+      : isGuest
+        ? "游客模式也会保留当前浏览器对应的聊天历史，但试用次数会由服务端严格控制。"
+        : "输入区仍然保留在工作台里，但真正能不能继续发送、保存和恢复会话，仍由服务端身份状态决定。";
 
   const syncChatIdToUrl = useCallback((nextChatId: string | null) => {
     const nextUrl = new URL(window.location.href);
@@ -160,8 +189,10 @@ export function ChatApp({ initialData }: { initialData: HomePageData }) {
     const rememberedEmail = currentUser?.email ?? authEmail;
 
     setInput("");
+    setViewerKind("user");
     setIsAuthenticated(false);
     setCurrentUser(null);
+    setGuestSession(null);
     setChats([]);
     if (!preserveMessages) {
       setMessages([]);
@@ -184,24 +215,28 @@ export function ChatApp({ initialData }: { initialData: HomePageData }) {
       return;
     }
 
-    messagesViewportRef.current?.scrollTo({
+    if (!messagesViewportRef.current?.scrollTo) {
+      return;
+    }
+
+    messagesViewportRef.current.scrollTo({
       top: messagesViewportRef.current.scrollHeight,
       behavior: "auto",
     });
   }, [messages]);
 
   useEffect(() => {
-    if (!isAuthenticated || !chatId) {
+    if (isAuthLocked || !chatId) {
       return;
     }
 
     // 首屏如果已经由服务端选中了某个 chat，需要立刻把它同步到浏览器本地，
     // 这样 localStorage 里不会继续残留上一次旧会话的 id。
     window.localStorage.setItem("activeChatId", chatId);
-  }, [chatId, isAuthenticated]);
+  }, [chatId, isAuthLocked]);
 
   useEffect(() => {
-    if (!isAuthenticated || chatId) {
+    if (isAuthLocked || chatId) {
       return;
     }
 
@@ -245,7 +280,7 @@ export function ChatApp({ initialData }: { initialData: HomePageData }) {
         );
       }
     })();
-  }, [chatId, chats, isAuthenticated, moveToSignedOutState, syncChatIdToUrl]);
+  }, [chatId, chats, isAuthLocked, moveToSignedOutState, syncChatIdToUrl]);
 
   async function loadChatHistory(activeChatId: string) {
     try {
@@ -280,7 +315,7 @@ export function ChatApp({ initialData }: { initialData: HomePageData }) {
   }
 
   async function loadChatList() {
-    if (!isAuthenticated) {
+    if (isAuthLocked) {
       setChats([]);
       return;
     }
@@ -477,8 +512,10 @@ export function ChatApp({ initialData }: { initialData: HomePageData }) {
       }
 
       // 这里先把客户端状态清空，再刷新页面，让服务端重新输出 signed-out 首屏。
+      setViewerKind("user");
       setIsAuthenticated(false);
       setCurrentUser(null);
+      setGuestSession(null);
       setChats([]);
       setMessages([]);
       setChatId(null);
@@ -495,8 +532,13 @@ export function ChatApp({ initialData }: { initialData: HomePageData }) {
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
-    if (!isAuthenticated) {
+    if (isAuthLocked) {
       setError("请先登录后再开始聊天");
+      return;
+    }
+
+    if (isGuestQuotaExhausted) {
+      setError(guestUpgradeMessage);
       return;
     }
 
@@ -540,6 +582,22 @@ export function ChatApp({ initialData }: { initialData: HomePageData }) {
       if (!response.ok) {
         const data = (await response.json()) as ErrorPayload;
 
+        if (response.status === 403 && data.error === guestTrialLimitMessage) {
+          setGuestSession((currentGuestSession) =>
+            currentGuestSession
+              ? {
+                  ...currentGuestSession,
+                  trialMessageCount: currentGuestSession.messageLimit,
+                }
+              : {
+                  id: createBrowserId(),
+                  trialMessageCount: defaultGuestMessageLimit,
+                  messageLimit: defaultGuestMessageLimit,
+                },
+          );
+          throw new Error(guestUpgradeMessage);
+        }
+
         throw new Error(data.error || "请求失败");
       }
 
@@ -550,6 +608,24 @@ export function ChatApp({ initialData }: { initialData: HomePageData }) {
         // 记住当前会话 id，页面刷新后才能把同一个会话的历史记录读回来。
         window.localStorage.setItem("activeChatId", nextChatId);
         syncChatIdToUrl(nextChatId);
+      }
+
+      if (isGuest) {
+        setGuestSession((currentGuestSession) =>
+          currentGuestSession
+            ? {
+                ...currentGuestSession,
+                trialMessageCount: Math.min(
+                  currentGuestSession.messageLimit,
+                  currentGuestSession.trialMessageCount + 1,
+                ),
+              }
+            : {
+                id: createBrowserId(),
+                trialMessageCount: 1,
+                messageLimit: defaultGuestMessageLimit,
+              },
+        );
       }
 
       if (!response.body) {
@@ -609,7 +685,12 @@ export function ChatApp({ initialData }: { initialData: HomePageData }) {
     }
   }
 
-  function renderAuthPanel(isCompact = false) {
+  function renderAuthPanel(
+    isCompact = false,
+    variant: "recovery" | "upgrade" = "recovery",
+  ) {
+    const isUpgradeVariant = variant === "upgrade";
+
     return (
       <div
         className={
@@ -619,7 +700,13 @@ export function ChatApp({ initialData }: { initialData: HomePageData }) {
         }
       >
         <p className="text-xs font-semibold uppercase tracking-[0.34em] text-slate-500">
-          {isCompact ? "Reconnect workspace" : "Account access"}
+          {isUpgradeVariant
+            ? isCompact
+              ? "Upgrade guest workspace"
+              : "Continue with account"
+            : isCompact
+              ? "Reconnect workspace"
+              : "Account access"}
         </p>
         <h3
           className={
@@ -628,23 +715,33 @@ export function ChatApp({ initialData }: { initialData: HomePageData }) {
               : "mt-5 font-display text-[2.85rem] leading-none tracking-[-0.05em] text-slate-900"
           }
         >
-          {isCompact
-            ? "刚才的上下文还在，先把身份接回来"
-            : "先登录，再开始真正的服务端聊天流程"}
+          {isUpgradeVariant
+            ? isCompact
+              ? "游客试用次数已用完"
+              : "把这段游客历史接到账号里继续"
+            : isCompact
+              ? "刚才的上下文还在，先把身份接回来"
+              : "先登录，再开始真正的服务端聊天流程"}
         </h3>
         <p className="mt-3 text-sm leading-7 text-slate-600">
-          {isCompact
-            ? "当前对话没有被抹掉，只是发送、保存和切换会话已经暂时上锁。重新登录后，再继续这段思路。"
-            : "未登录态不是普通表单卡片，而是一段进入工作台之前的过渡空间。先确认身份，再把账号、会话和上下文重新接上。"}
+          {isUpgradeVariant
+            ? isCompact
+              ? "历史记录还在这里，但继续发送前需要切到正式账号。登录或注册后，这段聊天还能接着走。"
+              : "你已经把游客试用次数用完了。现在登录或注册，就能继续聊天，并把这段历史真正保存下来。"
+            : isCompact
+              ? "当前对话没有被抹掉，只是发送、保存和切换会话已经暂时上锁。重新登录后，再继续这段思路。"
+              : "未登录态不是普通表单卡片，而是一段进入工作台之前的过渡空间。先确认身份，再把账号、会话和上下文重新接上。"}
         </p>
 
         {!isCompact ? (
           <div className="mt-7 rounded-[1.7rem] border border-white/80 bg-white/68 px-5 py-5 shadow-[inset_0_1px_0_rgba(255,255,255,0.92)]">
             <p className="text-[11px] font-semibold uppercase tracking-[0.34em] text-slate-500">
-              Private workspace
+              {isUpgradeVariant ? "Unlock full workspace" : "Private workspace"}
             </p>
             <p className="mt-3 text-sm leading-7 text-slate-700">
-              为账号、会话和思考过程预留一个安静且可恢复的空间。
+              {isUpgradeVariant
+                ? "游客阶段先帮你试一段，切到账号后再把完整历史、恢复能力和会话管理接回来。"
+                : "为账号、会话和思考过程预留一个安静且可恢复的空间。"}
             </p>
             <ul className="mt-5 space-y-3 text-sm leading-6 text-slate-600">
               {authBenefits.map((benefit) => (
@@ -808,7 +905,9 @@ export function ChatApp({ initialData }: { initialData: HomePageData }) {
               <p className="mt-4 text-sm leading-7 text-slate-600">
                 {isAuthenticated
                   ? `当前账号：${currentUserLabel}`
-                  : "先登录，再开始真正按账号隔离的聊天记录与权限控制"}
+                  : isGuest
+                    ? guestStatusLabel
+                    : "先登录，再开始真正按账号隔离的聊天记录与权限控制"}
               </p>
               <div className="mt-6 grid grid-cols-3 gap-2">
                 <div className="rounded-[1.2rem] border border-[rgba(19,36,51,0.08)] bg-white/72 px-3 py-3">
@@ -838,7 +937,7 @@ export function ChatApp({ initialData }: { initialData: HomePageData }) {
               </div>
               <button
                 className="mt-6 inline-flex min-h-11 w-full items-center justify-center rounded-full bg-[linear-gradient(135deg,#162738,#355469)] px-4 py-3 text-sm font-semibold text-white shadow-[0_18px_35px_rgba(19,36,51,0.2)] transition hover:translate-y-[-1px] hover:shadow-[0_22px_40px_rgba(19,36,51,0.22)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-500/40 disabled:cursor-not-allowed disabled:opacity-60"
-                disabled={!isAuthenticated}
+                disabled={isAuthLocked}
                 onClick={handleStartNewChat}
                 type="button"
               >
@@ -905,14 +1004,16 @@ export function ChatApp({ initialData }: { initialData: HomePageData }) {
             ) : null}
 
             <div className="mt-4 min-h-0 flex-1 overflow-y-auto pr-1">
-              {!isAuthenticated ? (
+              {isAuthLocked ? (
                 <div className="rounded-[1.5rem] border border-dashed border-[rgba(24,48,59,0.18)] bg-white/56 px-4 py-4 text-sm leading-6 text-slate-500">
                   登录后，这里会显示当前账号自己的聊天列表，不会再是全局共享数据。
                 </div>
               ) : chats.length === 0 ? (
                 <div className="space-y-3">
                   <div className="rounded-[1.5rem] border border-dashed border-[rgba(24,48,59,0.18)] bg-white/56 px-4 py-4 text-sm leading-6 text-slate-500">
-                    还没有历史对话。发出第一条消息后，这里会开始记录你的思路轨迹。
+                    {isGuest
+                      ? "游客模式也会保留自己的历史对话。发出第一条消息后，这里会开始记录这次试用里的思路轨迹。"
+                      : "还没有历史对话。发出第一条消息后，这里会开始记录你的思路轨迹。"}
                   </div>
                   <div className="grid gap-2">
                     {workspaceNotes.map((note) => (
@@ -972,23 +1073,37 @@ export function ChatApp({ initialData }: { initialData: HomePageData }) {
               <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
                 <p className="text-[11px] font-semibold uppercase tracking-[0.34em] text-slate-500">
-                  {isAuthenticated ? "Workspace Header" : "Recovery Desk"}
+                  {isAuthenticated
+                    ? "Workspace Header"
+                    : isGuest
+                      ? "Guest Desk"
+                      : "Recovery Desk"}
                 </p>
                 <h2 className="mt-1 truncate font-display text-[1.8rem] leading-none tracking-[-0.04em] text-slate-900 sm:text-[2.2rem]">
                   {isAuthenticated
                     ? chatId
                       ? activeChatTitle
                       : "准备开始新的对话"
-                    : hasMessages
-                      ? "恢复身份后，再继续这段对话"
-                      : "先完成登录或注册"}
+                    : isGuest
+                      ? isGuestQuotaExhausted
+                        ? "游客历史还在，接下来切到账号继续"
+                        : chatId
+                          ? activeChatTitle
+                          : "游客模式下先试着聊一轮"
+                      : hasMessages
+                        ? "恢复身份后，再继续这段对话"
+                        : "先完成登录或注册"}
                 </h2>
                 <p className="mt-3 max-w-2xl text-sm leading-7 text-slate-600">
                   {isAuthenticated
                     ? "左侧整理账号与会话，右侧保留真正用于思考、提问和推进工作的空间。"
-                    : hasMessages
-                      ? "当前内容仍保留在眼前，但继续发送、保存和切换会话前，需要先重新确认你的身份。"
-                      : "未登录时先展示身份入口与工作台轮廓，登录后再进入真正可恢复的个人会话空间。"}
+                    : isGuest
+                      ? isGuestQuotaExhausted
+                        ? "这段游客对话还在，切到正式账号后就能继续聊天，并把它长期保存下来。"
+                        : "游客模式下也能直接聊天和保留当前历史，但剩余次数始终由服务端控制。"
+                      : hasMessages
+                        ? "当前内容仍保留在眼前，但继续发送、保存和切换会话前，需要先重新确认你的身份。"
+                        : "未登录时先展示身份入口与工作台轮廓，登录后再进入真正可恢复的个人会话空间。"}
                 </p>
               </div>
                 <div className="hidden items-center gap-2 sm:flex">
@@ -1013,7 +1128,9 @@ export function ChatApp({ initialData }: { initialData: HomePageData }) {
                   </>
                 ) : (
                   <span className="rounded-full border border-[rgba(24,48,59,0.1)] bg-white/82 px-3 py-1.5 text-xs text-slate-500 shadow-sm">
-                    服务端身份已断开
+                    {isGuest
+                      ? guestStatusLabel
+                      : "服务端身份已断开"}
                   </span>
                 )}
               </div>
@@ -1029,6 +1146,11 @@ export function ChatApp({ initialData }: { initialData: HomePageData }) {
                 <span className="rounded-full border border-[rgba(24,48,59,0.1)] bg-white/78 px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-500 shadow-sm">
                   {savedSessionCount} saved sessions
                 </span>
+                {guestStatusLabel ? (
+                  <span className="rounded-full border border-[rgba(24,48,59,0.1)] bg-white/78 px-3 py-1.5 text-[11px] font-semibold tracking-[0.12em] text-slate-500 shadow-sm">
+                    {guestStatusLabel}
+                  </span>
+                ) : null}
               </div>
             </header>
 
@@ -1081,21 +1203,29 @@ export function ChatApp({ initialData }: { initialData: HomePageData }) {
                     </div>
                   ) : null}
 
-                  {!isAuthenticated ? renderAuthPanel(true) : null}
+                  {isAuthLocked
+                    ? renderAuthPanel(true)
+                    : isGuestQuotaExhausted
+                      ? renderAuthPanel(true, "upgrade")
+                      : null}
                 </div>
-              ) : isAuthenticated ? (
+              ) : !isAuthLocked ? (
                 <div className="mx-auto flex h-full w-full max-w-3xl flex-col items-center justify-center py-8 text-center">
                   <p className="text-xs font-semibold uppercase tracking-[0.34em] text-slate-500">
-                    Thoughtful AI
+                    {isGuest ? "Guest Trial" : "Thoughtful AI"}
                   </p>
                   <h3 className="mt-4 font-display text-5xl leading-none tracking-[-0.04em] text-slate-900 sm:text-6xl">
-                    A more beautiful place to think
+                    {isGuest ? "先用游客模式试着推进一段" : "A more beautiful place to think"}
                   </h3>
                   <p className="mt-4 max-w-2xl text-base leading-8 text-slate-600">
-                    把灵感、问题和暂时说不清的想法，都放进这里慢慢整理。
+                    {isGuest
+                      ? "不用先登录，先把眼前这段问题聊起来。服务端会按游客身份保留这次试用里的历史。"
+                      : "把灵感、问题和暂时说不清的想法，都放进这里慢慢整理。"}
                   </p>
                   <p className="mt-2 max-w-2xl text-sm leading-7 text-slate-500">
-                    从一个问题开始，或先借一个轻一点的提示，把今天真正要处理的事放进来。
+                    {isGuest
+                      ? "游客试用适合先验证方向；如果想继续聊下去或长期保存，再切到正式账号。"
+                      : "从一个问题开始，或先借一个轻一点的提示，把今天真正要处理的事放进来。"}
                   </p>
 
                   {error ? (
@@ -1106,10 +1236,12 @@ export function ChatApp({ initialData }: { initialData: HomePageData }) {
 
                   <div className="mt-8 w-full text-left">
                     <p className="text-[11px] font-semibold uppercase tracking-[0.34em] text-slate-500">
-                      Empty workspace
+                      {isGuest ? "Guest workspace" : "Empty workspace"}
                     </p>
                     <p className="mt-3 text-sm leading-7 text-slate-600">
-                      还没有开始保存新的会话。你可以直接输入问题，或者先选一个更轻一点的开场提示。
+                      {isGuest
+                        ? "游客试用还没开始保存新的会话。你可以直接输入问题，或者先选一个更轻一点的开场提示。"
+                        : "还没有开始保存新的会话。你可以直接输入问题，或者先选一个更轻一点的开场提示。"}
                     </p>
                   </div>
 
@@ -1157,12 +1289,16 @@ export function ChatApp({ initialData }: { initialData: HomePageData }) {
                   <textarea
                     id="chat-input"
                     className="min-h-24 max-h-56 w-full resize-none rounded-[1.2rem] bg-transparent px-2 py-2 text-sm leading-7 text-slate-900 outline-none placeholder:text-slate-400"
-                    disabled={!isAuthenticated || isLoading}
+                    disabled={isAuthLocked || isGuestQuotaExhausted || isLoading}
                     onChange={(event) => setInput(event.target.value)}
                     placeholder={
                       isAuthenticated
                         ? "比如：帮我把今天的想法梳理成更清楚的三个重点"
-                        : "先登录后再开始聊天"
+                        : isGuestQuotaExhausted
+                          ? "游客试用已用完，登录或注册后继续"
+                          : isGuest
+                            ? "比如：先帮我把这个问题拆成 3 个更清楚的小问题"
+                            : "先登录后再开始聊天"
                     }
                     value={input}
                   />
@@ -1177,7 +1313,7 @@ export function ChatApp({ initialData }: { initialData: HomePageData }) {
                     </div>
                     <button
                       className="inline-flex min-h-11 items-center justify-center rounded-full bg-[linear-gradient(135deg,#18303b,#325869)] px-5 py-3 text-sm font-semibold text-white shadow-[0_14px_28px_rgba(24,48,59,0.2)] transition hover:translate-y-[-1px] hover:shadow-[0_18px_32px_rgba(24,48,59,0.24)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-500/40 disabled:cursor-not-allowed disabled:translate-y-0 disabled:opacity-60"
-                      disabled={!isAuthenticated || isLoading}
+                      disabled={isAuthLocked || isGuestQuotaExhausted || isLoading}
                       type="submit"
                     >
                       {isLoading ? "发送中..." : "发送"}

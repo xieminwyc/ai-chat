@@ -3,6 +3,7 @@ import {
   streamAssistantReply,
 } from "@/server/ai/chat-provider";
 import { assertChatOwner } from "@/server/chat/chat-auth";
+import type { ChatOwner } from "@/server/chat/chat-types";
 import {
   createChat,
   createMessage,
@@ -13,45 +14,54 @@ import {
   listChats,
   renameChatTitle,
 } from "@/server/chat/chat-repository";
+import {
+  assertGuestMessageQuotaAvailable,
+  consumeGuestMessageQuota,
+} from "@/server/guest/guest-service";
 
 type PrepareChatReplyInput = {
-  userId: string;
+  owner: ChatOwner;
   chatId?: string;
   message: string;
 };
 
-export async function listChatSummaries(userId: string) {
-  return listChats(userId);
+export async function listChatSummaries(owner: ChatOwner) {
+  return listChats(owner);
 }
 
-export async function loadChatMessages(userId: string, chatId: string) {
-  return getChatMessages(chatId, userId);
+export async function loadChatMessages(owner: ChatOwner, chatId: string) {
+  return getChatMessages(chatId, owner);
 }
 
-export async function renameChat(userId: string, chatId: string, title: string) {
-  const chat = await getChatById(chatId, userId);
-  assertChatOwner(chat, userId);
+export async function renameChat(owner: ChatOwner, chatId: string, title: string) {
+  const chat = await getChatById(chatId, owner);
+  assertChatOwner(chat, owner);
   return renameChatTitle(chatId, title);
 }
 
-export async function deleteChatById(userId: string, chatId: string) {
-  const chat = await getChatById(chatId, userId);
-  assertChatOwner(chat, userId);
+export async function deleteChatById(owner: ChatOwner, chatId: string) {
+  const chat = await getChatById(chatId, owner);
+  assertChatOwner(chat, owner);
   await deleteChat(chatId);
 }
 
 export async function prepareChatReply({
-  userId,
+  owner,
   chatId,
   message,
 }: PrepareChatReplyInput) {
-  const existingChat = chatId ? await getChatById(chatId, userId) : null;
-  if (existingChat) {
-    assertChatOwner(existingChat, userId);
+  const existingChat = chatId ? await getChatById(chatId, owner) : null;
+  if (chatId) {
+    assertChatOwner(existingChat, owner);
   }
+
+  if (owner.kind === "guest") {
+    await assertGuestMessageQuotaAvailable(owner.guestSessionId);
+  }
+
   const activeChat =
     existingChat ??
-    (await createChat(createAssistantReply(message, { mode: "title" }), userId));
+    (await createChat(createAssistantReply(message, { mode: "title" }), owner));
 
   await createMessage({
     chatId: activeChat.id,
@@ -59,7 +69,11 @@ export async function prepareChatReply({
     content: message,
   });
 
-  const conversationMessages = await getConversationMessages(activeChat.id, userId);
+  if (owner.kind === "guest") {
+    await consumeGuestMessageQuota(owner.guestSessionId);
+  }
+
+  const conversationMessages = await getConversationMessages(activeChat.id, owner);
   const replyStream = await streamAssistantReply(conversationMessages);
 
   return {
