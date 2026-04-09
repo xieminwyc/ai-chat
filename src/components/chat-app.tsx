@@ -53,6 +53,7 @@ const sessionExpiredMessage = "登录状态已失效，请重新登录。";
 const guestTrialLimitMessage =
   "Guest trial limit reached. Please register to continue.";
 const guestUpgradeMessage = "游客试用次数已用完，注册后可继续聊天并保存历史";
+const emailVerificationRequiredMessage = "请先验证邮箱后再继续聊天。";
 const defaultGuestMessageLimit = 3;
 
 function formatChatUpdatedAt(updatedAt?: string) {
@@ -105,6 +106,7 @@ export function ChatApp({ initialData }: { initialData: HomePageData }) {
     initialData.isAuthenticated,
   );
   const [currentUser, setCurrentUser] = useState(initialData.currentUser);
+  const [mergeCandidate, setMergeCandidate] = useState(initialData.mergeCandidate);
   const [guestSession, setGuestSession] = useState(initialData.guestSession);
   const [chats, setChats] = useState<ChatSummary[]>(initialData.initialChats);
   const [messages, setMessages] = useState<ChatMessage[]>(
@@ -123,6 +125,11 @@ export function ChatApp({ initialData }: { initialData: HomePageData }) {
   const [authFeedbackTone, setAuthFeedbackTone] =
     useState<AuthFeedbackTone | null>(null);
   const [isAuthSubmitting, setIsAuthSubmitting] = useState(false);
+  const [isGuestAuthPanelVisible, setIsGuestAuthPanelVisible] = useState(false);
+  const [isMergingGuestHistory, setIsMergingGuestHistory] = useState(false);
+  const [mergeFeedback, setMergeFeedback] = useState<string | null>(null);
+  const [mergeFeedbackTone, setMergeFeedbackTone] =
+    useState<AuthFeedbackTone | null>(null);
   const [error, setError] = useState<string | null>(null);
   const messagesViewportRef = useRef<HTMLDivElement | null>(null);
   const activeChat = chats.find((chat) => chat.id === chatId);
@@ -132,6 +139,10 @@ export function ChatApp({ initialData }: { initialData: HomePageData }) {
   const hasAuthError = authFeedbackTone === "error";
   const isGuest = viewerKind === "guest";
   const isAuthLocked = !isAuthenticated && viewerKind !== "guest";
+  const isVerificationPending =
+    isAuthenticated && currentUser?.isEmailVerified === false;
+  const shouldShowMergePrompt =
+    isAuthenticated && !isVerificationPending && mergeCandidate !== null;
   const guestMessagesUsed = guestSession?.trialMessageCount ?? 0;
   const guestMessageLimit = guestSession?.messageLimit ?? defaultGuestMessageLimit;
   const guestMessagesRemaining = isGuest
@@ -146,12 +157,16 @@ export function ChatApp({ initialData }: { initialData: HomePageData }) {
   const currentUserLabel = currentUser?.email ?? "已登录用户";
   const savedSessionCount = String(chats.length).padStart(2, "0");
   const workspaceModeLabel = isAuthenticated
-    ? "Account synced"
+    ? isVerificationPending
+      ? "Email pending"
+      : "Account synced"
     : isGuest
       ? "Guest trial"
       : "Recovery needed";
   const workspaceStateLabel = error
     ? "Needs attention"
+    : isVerificationPending
+      ? "Verification needed"
     : isLoading
       ? "Reply streaming"
       : isGuestQuotaExhausted
@@ -160,7 +175,9 @@ export function ChatApp({ initialData }: { initialData: HomePageData }) {
         ? "Conversation active"
         : "Quiet and ready";
   const composerHint = isAuthenticated
-    ? "当前回复来自服务端模型流式输出，聊天记录会继续保存到 PostgreSQL，方便你回到同一段上下文。"
+    ? isVerificationPending
+      ? "你已经登录，但邮箱还没完成验证。验证完成前，账号聊天入口会保持只读，避免把未激活账号当成完整主体继续使用。"
+      : "当前回复来自服务端模型流式输出，聊天记录会继续保存到 PostgreSQL，方便你回到同一段上下文。"
     : isGuestQuotaExhausted
       ? guestUpgradeMessage
       : isGuest
@@ -529,11 +546,87 @@ export function ChatApp({ initialData }: { initialData: HomePageData }) {
     }
   }
 
+  async function handleResendVerificationEmail() {
+    setIsAuthSubmitting(true);
+    setAuthFeedback(null);
+    setAuthFeedbackTone(null);
+
+    try {
+      const response = await fetch("/api/auth/resend-verification", {
+        method: "POST",
+      });
+      const data = (await response.json()) as ErrorPayload;
+
+      if (!response.ok) {
+        throw new Error(data.error || "重新发送验证邮件失败");
+      }
+
+      setAuthFeedback("验证邮件已重新发送，请检查邮箱。");
+      setAuthFeedbackTone("success");
+    } catch (error) {
+      setAuthFeedback(
+        error instanceof Error ? error.message : "重新发送验证邮件失败",
+      );
+      setAuthFeedbackTone("error");
+    } finally {
+      setIsAuthSubmitting(false);
+    }
+  }
+
+  async function handleMergeGuestHistory() {
+    if (!mergeCandidate) {
+      return;
+    }
+
+    setIsMergingGuestHistory(true);
+    setMergeFeedback(null);
+    setMergeFeedbackTone(null);
+    setError(null);
+
+    try {
+      const response = await fetch("/api/guest/merge", {
+        method: "POST",
+      });
+      const data = (await response.json()) as ErrorPayload & {
+        mergedChatCount?: number;
+      };
+
+      if (response.status === 401) {
+        moveToSignedOutState(data.error || sessionExpiredMessage);
+        return;
+      }
+
+      if (!response.ok) {
+        throw new Error(data.error || "合并游客历史失败");
+      }
+
+      setMergeCandidate(null);
+      setGuestSession(null);
+      setMergeFeedback("游客历史已合并到当前账号。");
+      setMergeFeedbackTone("success");
+      await loadChatList();
+    } catch (error) {
+      setMergeFeedback(error instanceof Error ? error.message : "合并游客历史失败");
+      setMergeFeedbackTone("error");
+    } finally {
+      setIsMergingGuestHistory(false);
+    }
+  }
+
+  function dismissMergePrompt() {
+    setMergeCandidate(null);
+  }
+
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
     if (isAuthLocked) {
       setError("请先登录后再开始聊天");
+      return;
+    }
+
+    if (isVerificationPending) {
+      setError(emailVerificationRequiredMessage);
       return;
     }
 
@@ -685,11 +778,53 @@ export function ChatApp({ initialData }: { initialData: HomePageData }) {
     }
   }
 
+  function renderVerificationPanel(isCompact = false) {
+    return (
+      <div
+        className={
+          isCompact
+            ? "rounded-[1.55rem] border border-amber-200/80 bg-amber-50/90 px-4 py-4 text-sm leading-6 text-amber-900 shadow-sm"
+            : "rounded-[1.85rem] border border-amber-200/80 bg-amber-50/90 px-5 py-5 text-sm leading-7 text-amber-900 shadow-sm"
+        }
+      >
+        <p className="text-[11px] font-semibold uppercase tracking-[0.28em] text-amber-700/90">
+          Email verification
+        </p>
+        <h3 className="mt-3 text-xl font-semibold text-amber-950">
+          请先验证邮箱
+        </h3>
+        <p className="mt-2">
+          你已经登录成功，但邮箱还没激活。验证完成前，账号聊天会保持只读，避免把未验证账号当成完整身份继续写入和推进。
+        </p>
+        <div className="mt-4 flex flex-wrap gap-3">
+          <button
+            className="inline-flex min-h-11 items-center justify-center rounded-full bg-amber-900 px-4 py-3 text-sm font-semibold text-white transition hover:bg-amber-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-300/50 disabled:cursor-not-allowed disabled:opacity-60"
+            disabled={isAuthSubmitting}
+            onClick={() => void handleResendVerificationEmail()}
+            type="button"
+          >
+            {isAuthSubmitting ? "发送中..." : "重新发送验证邮件"}
+          </button>
+        </div>
+        {authFeedback ? (
+          <p
+            className={`mt-3 text-sm ${
+              authFeedbackTone === "error" ? "text-red-700" : "text-emerald-700"
+            }`}
+          >
+            {authFeedback}
+          </p>
+        ) : null}
+      </div>
+    );
+  }
+
   function renderAuthPanel(
     isCompact = false,
-    variant: "recovery" | "upgrade" = "recovery",
+    variant: "recovery" | "upgrade" | "guest" = "recovery",
   ) {
     const isUpgradeVariant = variant === "upgrade";
+    const isGuestVariant = variant === "guest";
 
     return (
       <div
@@ -700,7 +835,11 @@ export function ChatApp({ initialData }: { initialData: HomePageData }) {
         }
       >
         <p className="text-xs font-semibold uppercase tracking-[0.34em] text-slate-500">
-          {isUpgradeVariant
+          {isGuestVariant
+            ? isCompact
+              ? "Use your account anytime"
+              : "Guest with account option"
+            : isUpgradeVariant
             ? isCompact
               ? "Upgrade guest workspace"
               : "Continue with account"
@@ -715,7 +854,11 @@ export function ChatApp({ initialData }: { initialData: HomePageData }) {
               : "mt-5 font-display text-[2.85rem] leading-none tracking-[-0.05em] text-slate-900"
           }
         >
-          {isUpgradeVariant
+          {isGuestVariant
+            ? isCompact
+              ? "游客也可以随时切到正式账号"
+              : "先试聊，也随时可以登录或注册"
+            : isUpgradeVariant
             ? isCompact
               ? "游客试用次数已用完"
               : "把这段游客历史接到账号里继续"
@@ -724,7 +867,11 @@ export function ChatApp({ initialData }: { initialData: HomePageData }) {
               : "先登录，再开始真正的服务端聊天流程"}
         </h3>
         <p className="mt-3 text-sm leading-7 text-slate-600">
-          {isUpgradeVariant
+          {isGuestVariant
+            ? isCompact
+              ? "游客模式只是帮你先把问题聊起来。如果你已经有账号，或者现在就想把后续历史稳定地挂到账号下面，可以直接登录或注册。"
+              : "你不需要等游客试用结束才切账号。想从一开始就按账号保存、恢复和管理聊天，也可以现在直接登录或注册。"
+            : isUpgradeVariant
             ? isCompact
               ? "历史记录还在这里，但继续发送前需要切到正式账号。登录或注册后，这段聊天还能接着走。"
               : "你已经把游客试用次数用完了。现在登录或注册，就能继续聊天，并把这段历史真正保存下来。"
@@ -736,10 +883,16 @@ export function ChatApp({ initialData }: { initialData: HomePageData }) {
         {!isCompact ? (
           <div className="mt-7 rounded-[1.7rem] border border-white/80 bg-white/68 px-5 py-5 shadow-[inset_0_1px_0_rgba(255,255,255,0.92)]">
             <p className="text-[11px] font-semibold uppercase tracking-[0.34em] text-slate-500">
-              {isUpgradeVariant ? "Unlock full workspace" : "Private workspace"}
+              {isGuestVariant
+                ? "Account-ready workspace"
+                : isUpgradeVariant
+                  ? "Unlock full workspace"
+                  : "Private workspace"}
             </p>
             <p className="mt-3 text-sm leading-7 text-slate-700">
-              {isUpgradeVariant
+              {isGuestVariant
+                ? "游客阶段先帮你起步，但账号模式会把历史、恢复能力和后续管理都稳定接回来。"
+                : isUpgradeVariant
                 ? "游客阶段先帮你试一段，切到账号后再把完整历史、恢复能力和会话管理接回来。"
                 : "为账号、会话和思考过程预留一个安静且可恢复的空间。"}
             </p>
@@ -872,6 +1025,54 @@ export function ChatApp({ initialData }: { initialData: HomePageData }) {
     );
   }
 
+  function renderMergePrompt() {
+    if (!shouldShowMergePrompt || !mergeCandidate) {
+      return null;
+    }
+
+    return (
+      <div className="rounded-[1.6rem] border border-[rgba(24,48,59,0.1)] bg-[linear-gradient(145deg,rgba(245,238,228,0.92),rgba(255,255,255,0.92))] px-5 py-5 shadow-[0_18px_35px_rgba(24,48,59,0.08)]">
+        <p className="text-[11px] font-semibold uppercase tracking-[0.28em] text-slate-500">
+          Guest history
+        </p>
+        <h3 className="mt-3 text-xl font-semibold text-slate-950">
+          检测到游客历史
+        </h3>
+        <p className="mt-2 text-sm leading-7 text-slate-600">
+          当前浏览器里还有一段游客阶段留下来的聊天历史。现在合并后，这些会话会正式归到当前账号下面继续管理。
+        </p>
+        <p className="mt-2 text-sm leading-7 text-slate-500">
+          本次可合并记录里已经消耗了 {mergeCandidate.trialMessageCount} 次游客试用。
+        </p>
+        <div className="mt-4 flex flex-wrap gap-3">
+          <button
+            className="inline-flex min-h-11 items-center justify-center rounded-full bg-slate-900 px-4 py-3 text-sm font-semibold text-white transition hover:bg-slate-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-500/40 disabled:cursor-not-allowed disabled:opacity-60"
+            disabled={isMergingGuestHistory}
+            onClick={() => void handleMergeGuestHistory()}
+            type="button"
+          >
+            {isMergingGuestHistory ? "合并中..." : "合并当前游客历史"}
+          </button>
+          <button
+            className="inline-flex min-h-11 items-center justify-center rounded-full border border-[rgba(24,48,59,0.12)] bg-white/92 px-4 py-3 text-sm font-medium text-slate-700 transition hover:bg-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-500/30"
+            disabled={isMergingGuestHistory}
+            onClick={dismissMergePrompt}
+            type="button"
+          >
+            暂不合并
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  function openGuestAuthPanel(nextMode: AuthMode) {
+    setAuthMode(nextMode);
+    setAuthFeedback(null);
+    setAuthFeedbackTone(null);
+    setIsGuestAuthPanelVisible(true);
+  }
+
   return (
     <main className="relative min-h-[100svh] overflow-hidden px-4 py-4 text-slate-950 sm:px-6 sm:py-6 lg:px-8 lg:py-8">
       <div
@@ -937,7 +1138,7 @@ export function ChatApp({ initialData }: { initialData: HomePageData }) {
               </div>
               <button
                 className="mt-6 inline-flex min-h-11 w-full items-center justify-center rounded-full bg-[linear-gradient(135deg,#162738,#355469)] px-4 py-3 text-sm font-semibold text-white shadow-[0_18px_35px_rgba(19,36,51,0.2)] transition hover:translate-y-[-1px] hover:shadow-[0_22px_40px_rgba(19,36,51,0.22)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-500/40 disabled:cursor-not-allowed disabled:opacity-60"
-                disabled={isAuthLocked}
+                disabled={isAuthLocked || isVerificationPending}
                 onClick={handleStartNewChat}
                 type="button"
               >
@@ -1126,6 +1327,31 @@ export function ChatApp({ initialData }: { initialData: HomePageData }) {
                       退出登录
                     </button>
                   </>
+                ) : isGuest && !isGuestQuotaExhausted ? (
+                  <>
+                    <button
+                      className={`inline-flex min-h-10 items-center justify-center rounded-full px-4 py-2 text-sm font-medium transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-500/30 ${
+                        authMode === "login" && isGuestAuthPanelVisible
+                          ? "bg-slate-900 text-white"
+                          : "border border-[rgba(24,48,59,0.12)] bg-white/90 text-slate-700"
+                      }`}
+                      onClick={() => openGuestAuthPanel("login")}
+                      type="button"
+                    >
+                      登录
+                    </button>
+                    <button
+                      className={`inline-flex min-h-10 items-center justify-center rounded-full px-4 py-2 text-sm font-medium transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-500/30 ${
+                        authMode === "register" && isGuestAuthPanelVisible
+                          ? "bg-slate-900 text-white"
+                          : "border border-[rgba(24,48,59,0.12)] bg-white/90 text-slate-700"
+                      }`}
+                      onClick={() => openGuestAuthPanel("register")}
+                      type="button"
+                    >
+                      注册
+                    </button>
+                  </>
                 ) : (
                   <span className="rounded-full border border-[rgba(24,48,59,0.1)] bg-white/82 px-3 py-1.5 text-xs text-slate-500 shadow-sm">
                     {isGuest
@@ -1152,6 +1378,25 @@ export function ChatApp({ initialData }: { initialData: HomePageData }) {
                   </span>
                 ) : null}
               </div>
+
+              {shouldShowMergePrompt ? renderMergePrompt() : null}
+
+              {isGuest && !isGuestQuotaExhausted && isGuestAuthPanelVisible
+                ? renderAuthPanel(true, "guest")
+                : null}
+
+              {mergeFeedback ? (
+                <div
+                  className={`rounded-[1.4rem] border px-4 py-3 text-sm leading-6 shadow-sm ${
+                    mergeFeedbackTone === "error"
+                      ? "border-red-200/80 bg-red-50/90 text-red-700"
+                      : "border-emerald-200/80 bg-emerald-50/90 text-emerald-700"
+                  }`}
+                  role={mergeFeedbackTone === "error" ? "alert" : "status"}
+                >
+                  {mergeFeedback}
+                </div>
+              ) : null}
             </header>
 
             <div
@@ -1203,7 +1448,9 @@ export function ChatApp({ initialData }: { initialData: HomePageData }) {
                     </div>
                   ) : null}
 
-                  {isAuthLocked
+                  {isVerificationPending
+                    ? renderVerificationPanel(true)
+                    : isAuthLocked
                     ? renderAuthPanel(true)
                     : isGuestQuotaExhausted
                       ? renderAuthPanel(true, "upgrade")
@@ -1231,6 +1478,16 @@ export function ChatApp({ initialData }: { initialData: HomePageData }) {
                   {error ? (
                     <div className="mt-6 w-full rounded-[1.4rem] border border-red-200/80 bg-red-50/90 px-4 py-3 text-left text-sm leading-6 text-red-700 shadow-sm">
                       {error}
+                    </div>
+                  ) : null}
+
+                  {isVerificationPending ? (
+                    <div className="mt-6 w-full">
+                      {renderVerificationPanel()}
+                    </div>
+                  ) : isGuestQuotaExhausted ? (
+                    <div className="mt-6 w-full text-left">
+                      {renderAuthPanel(true, "upgrade")}
                     </div>
                   ) : null}
 
@@ -1289,11 +1546,18 @@ export function ChatApp({ initialData }: { initialData: HomePageData }) {
                   <textarea
                     id="chat-input"
                     className="min-h-24 max-h-56 w-full resize-none rounded-[1.2rem] bg-transparent px-2 py-2 text-sm leading-7 text-slate-900 outline-none placeholder:text-slate-400"
-                    disabled={isAuthLocked || isGuestQuotaExhausted || isLoading}
+                    disabled={
+                      isAuthLocked ||
+                      isGuestQuotaExhausted ||
+                      isVerificationPending ||
+                      isLoading
+                    }
                     onChange={(event) => setInput(event.target.value)}
                     placeholder={
                       isAuthenticated
-                        ? "比如：帮我把今天的想法梳理成更清楚的三个重点"
+                        ? isVerificationPending
+                          ? "请先完成邮箱验证后再继续账号聊天"
+                          : "比如：帮我把今天的想法梳理成更清楚的三个重点"
                         : isGuestQuotaExhausted
                           ? "游客试用已用完，登录或注册后继续"
                           : isGuest
@@ -1313,7 +1577,12 @@ export function ChatApp({ initialData }: { initialData: HomePageData }) {
                     </div>
                     <button
                       className="inline-flex min-h-11 items-center justify-center rounded-full bg-[linear-gradient(135deg,#18303b,#325869)] px-5 py-3 text-sm font-semibold text-white shadow-[0_14px_28px_rgba(24,48,59,0.2)] transition hover:translate-y-[-1px] hover:shadow-[0_18px_32px_rgba(24,48,59,0.24)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-500/40 disabled:cursor-not-allowed disabled:translate-y-0 disabled:opacity-60"
-                      disabled={isAuthLocked || isGuestQuotaExhausted || isLoading}
+                      disabled={
+                        isAuthLocked ||
+                        isGuestQuotaExhausted ||
+                        isVerificationPending ||
+                        isLoading
+                      }
                       type="submit"
                     >
                       {isLoading ? "发送中..." : "发送"}

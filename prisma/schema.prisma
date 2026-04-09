@@ -7,13 +7,15 @@ datasource db {
 }
 
 model User {
-  id           String    @id @default(cuid())
-  email        String    @unique
-  passwordHash String
-  createdAt    DateTime  @default(now()) @db.Timestamptz(3)
-  updatedAt    DateTime  @default(now()) @db.Timestamptz(3)
-  sessions     Session[]
-  chats        Chat[]
+  id                      String                   @id @default(cuid())
+  email                   String                   @unique
+  passwordHash            String
+  emailVerifiedAt         DateTime?                @db.Timestamptz(3)
+  createdAt               DateTime                 @default(now()) @db.Timestamptz(3)
+  updatedAt               DateTime                 @default(now()) @db.Timestamptz(3)
+  sessions                Session[]
+  chats                   Chat[]
+  emailVerificationTokens EmailVerificationToken[]
 }
 
 model Session {
@@ -25,6 +27,18 @@ model Session {
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId])
+}
+
+model EmailVerificationToken {
+  id         String   @id @default(cuid())
+  userId     String
+  tokenHash  String   @unique
+  expiresAt  DateTime @db.Timestamptz(3)
+  usedAt     DateTime? @db.Timestamptz(3)
+  createdAt  DateTime @default(now()) @db.Timestamptz(3)
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
 }
 
 model GuestSession {

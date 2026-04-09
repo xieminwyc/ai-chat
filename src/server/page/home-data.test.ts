@@ -18,6 +18,7 @@ const chatService = vi.hoisted(() => ({
 const guestService = vi.hoisted(() => ({
   GUEST_MESSAGE_LIMIT: 3,
   getCurrentGuestSession: vi.fn(),
+  getMergeableGuestSession: vi.fn(),
   getOrCreateGuestSession: vi.fn(),
 }));
 
@@ -26,6 +27,7 @@ const authSession = vi.hoisted(() => ({
 }));
 
 const guestSession = vi.hoisted(() => ({
+  getGuestAuthShellCookieName: vi.fn(),
   getGuestCookieName: vi.fn(),
 }));
 
@@ -42,12 +44,14 @@ describe("home-data", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     authSession.getSessionCookieName.mockReturnValue("ai-chat-session");
+    guestSession.getGuestAuthShellCookieName.mockReturnValue("ai-chat-auth-shell");
     guestSession.getGuestCookieName.mockReturnValue("ai-chat-guest");
     nextHeaders.cookies.mockResolvedValue({
       get: vi.fn().mockReturnValue(undefined),
     });
     authService.getCurrentSession.mockResolvedValue(null);
     guestService.getCurrentGuestSession.mockResolvedValue(null);
+    guestService.getMergeableGuestSession.mockResolvedValue(null);
     guestService.getOrCreateGuestSession.mockResolvedValue({
       guestSession: {
         id: "guest_1",
@@ -74,6 +78,31 @@ describe("home-data", () => {
       viewerKind: "guest",
       isAuthenticated: false,
       currentUser: null,
+      mergeCandidate: null,
+      guestSession: null,
+      initialChats: [],
+      initialMessages: [],
+      initialChatId: null,
+    });
+  });
+
+  it("returns signed-out auth bootstrap state when auth-shell cookie is present", async () => {
+    nextHeaders.cookies.mockResolvedValue({
+      get: vi.fn().mockImplementation((name: string) =>
+        name === "ai-chat-auth-shell"
+          ? { name, value: "1" }
+          : undefined,
+      ),
+    });
+
+    const data = await getHomePageData({});
+
+    expect(guestService.getCurrentGuestSession).not.toHaveBeenCalled();
+    expect(data).toEqual({
+      viewerKind: "user",
+      isAuthenticated: false,
+      currentUser: null,
+      mergeCandidate: null,
       guestSession: null,
       initialChats: [],
       initialMessages: [],
@@ -164,6 +193,7 @@ describe("home-data", () => {
       viewerKind: "guest",
       isAuthenticated: false,
       currentUser: null,
+      mergeCandidate: null,
       guestSession: null,
       initialChats: [],
       initialMessages: [],
@@ -188,6 +218,7 @@ describe("home-data", () => {
       user: {
         id: "user_1",
         email: "alice@example.com",
+        emailVerifiedAt: new Date("2026-04-08T03:00:00.000Z"),
         createdAt: new Date("2026-04-08T01:00:00.000Z"),
         updatedAt: new Date("2026-04-08T01:00:00.000Z"),
       },
@@ -215,9 +246,12 @@ describe("home-data", () => {
       currentUser: {
         id: "user_1",
         email: "alice@example.com",
+        emailVerifiedAt: "2026-04-08T03:00:00.000Z",
+        isEmailVerified: true,
         createdAt: "2026-04-08T01:00:00.000Z",
         updatedAt: "2026-04-08T01:00:00.000Z",
       },
+      mergeCandidate: null,
       guestSession: null,
       initialChats: [
         {
@@ -229,6 +263,55 @@ describe("home-data", () => {
       ],
       initialMessages: [],
       initialChatId: null,
+    });
+  });
+
+  it("includes a merge candidate for verified users when a guest cookie is still present", async () => {
+    nextHeaders.cookies.mockResolvedValue({
+      get: vi.fn().mockImplementation((name: string) => {
+        if (name === "ai-chat-session") {
+          return { name, value: "session-token" };
+        }
+
+        if (name === "ai-chat-guest") {
+          return { name, value: "guest-token" };
+        }
+
+        return undefined;
+      }),
+    });
+    authService.getCurrentSession.mockResolvedValue({
+      id: "session_1",
+      token: "session-token",
+      userId: "user_1",
+      expiresAt: new Date("2026-04-15T01:00:00.000Z"),
+      createdAt: new Date("2026-04-08T01:00:00.000Z"),
+      user: {
+        id: "user_1",
+        email: "alice@example.com",
+        emailVerifiedAt: new Date("2026-04-08T03:00:00.000Z"),
+        createdAt: new Date("2026-04-08T01:00:00.000Z"),
+        updatedAt: new Date("2026-04-08T01:00:00.000Z"),
+      },
+    });
+    guestService.getMergeableGuestSession.mockResolvedValue({
+      id: "guest_1",
+      guestToken: "guest-token",
+      trialMessageCount: 2,
+      mergedAt: null,
+      expiresAt: new Date("2026-04-22T01:00:00.000Z"),
+      createdAt: new Date("2026-04-08T01:00:00.000Z"),
+      updatedAt: new Date("2026-04-08T01:00:00.000Z"),
+    });
+
+    const data = await getHomePageData({});
+
+    expect(guestService.getMergeableGuestSession).toHaveBeenCalledWith(
+      "guest-token",
+    );
+    expect(data.mergeCandidate).toEqual({
+      guestSessionId: "guest_1",
+      trialMessageCount: 2,
     });
   });
 

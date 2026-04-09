@@ -5,11 +5,18 @@ const { prisma } = vi.hoisted(() => ({
     user: {
       create: vi.fn(),
       findUnique: vi.fn(),
+      update: vi.fn(),
     },
     session: {
       create: vi.fn(),
       deleteMany: vi.fn(),
       findUnique: vi.fn(),
+    },
+    emailVerificationToken: {
+      create: vi.fn(),
+      deleteMany: vi.fn(),
+      findUnique: vi.fn(),
+      update: vi.fn(),
     },
   },
 }));
@@ -19,12 +26,17 @@ vi.mock("@/lib/prisma", () => ({
 }));
 
 import {
+  createEmailVerificationToken,
   createSessionRecord,
   createUser,
+  deleteUnusedEmailVerificationTokensByUserId,
   deleteSessionByToken,
+  findEmailVerificationTokenByHash,
   findSessionByToken,
   findUserByEmail,
   findUserById,
+  markEmailVerificationTokenUsed,
+  markUserEmailVerified,
 } from "@/server/auth/auth-repository";
 
 describe("auth-repository", () => {
@@ -36,6 +48,7 @@ describe("auth-repository", () => {
     prisma.user.create.mockResolvedValue({
       id: "user_1",
       email: "alice@example.com",
+      emailVerifiedAt: null,
       createdAt: new Date("2026-04-08T01:00:00.000Z"),
       updatedAt: new Date("2026-04-08T01:00:00.000Z"),
     });
@@ -53,6 +66,7 @@ describe("auth-repository", () => {
       select: {
         id: true,
         email: true,
+        emailVerifiedAt: true,
         createdAt: true,
         updatedAt: true,
       },
@@ -65,6 +79,7 @@ describe("auth-repository", () => {
       .mockResolvedValueOnce({
         id: "user_1",
         email: "alice@example.com",
+        emailVerifiedAt: null,
         passwordHash: "hashed-password",
         createdAt: new Date("2026-04-08T01:00:00.000Z"),
         updatedAt: new Date("2026-04-08T01:00:00.000Z"),
@@ -72,6 +87,7 @@ describe("auth-repository", () => {
       .mockResolvedValueOnce({
         id: "user_1",
         email: "alice@example.com",
+        emailVerifiedAt: null,
         passwordHash: "hashed-password",
         createdAt: new Date("2026-04-08T01:00:00.000Z"),
         updatedAt: new Date("2026-04-08T01:00:00.000Z"),
@@ -85,6 +101,7 @@ describe("auth-repository", () => {
       select: {
         id: true,
         email: true,
+        emailVerifiedAt: true,
         passwordHash: true,
         createdAt: true,
         updatedAt: true,
@@ -95,6 +112,7 @@ describe("auth-repository", () => {
       select: {
         id: true,
         email: true,
+        emailVerifiedAt: true,
         passwordHash: true,
         createdAt: true,
         updatedAt: true,
@@ -159,6 +177,7 @@ describe("auth-repository", () => {
           select: {
             id: true,
             email: true,
+            emailVerifiedAt: true,
             createdAt: true,
             updatedAt: true,
           },
@@ -174,6 +193,135 @@ describe("auth-repository", () => {
 
     expect(prisma.session.deleteMany).toHaveBeenCalledWith({
       where: { token: "session-token" },
+    });
+  });
+
+  it("creates, finds, and consumes email verification tokens", async () => {
+    const expiresAt = new Date("2026-04-10T01:00:00.000Z");
+    const usedAt = new Date("2026-04-09T01:00:00.000Z");
+
+    prisma.emailVerificationToken.create.mockResolvedValue({
+      id: "evt_1",
+      userId: "user_1",
+      tokenHash: "hashed-token",
+      expiresAt,
+      usedAt: null,
+      createdAt: new Date("2026-04-09T00:00:00.000Z"),
+    });
+    prisma.emailVerificationToken.findUnique.mockResolvedValue({
+      id: "evt_1",
+      userId: "user_1",
+      tokenHash: "hashed-token",
+      expiresAt,
+      usedAt: null,
+      createdAt: new Date("2026-04-09T00:00:00.000Z"),
+      user: {
+        id: "user_1",
+        email: "alice@example.com",
+        emailVerifiedAt: null,
+        passwordHash: "hashed-password",
+        createdAt: new Date("2026-04-08T01:00:00.000Z"),
+        updatedAt: new Date("2026-04-08T01:00:00.000Z"),
+      },
+    });
+    prisma.emailVerificationToken.update.mockResolvedValue({
+      id: "evt_1",
+      userId: "user_1",
+      tokenHash: "hashed-token",
+      expiresAt,
+      usedAt,
+      createdAt: new Date("2026-04-09T00:00:00.000Z"),
+    });
+
+    await createEmailVerificationToken({
+      userId: "user_1",
+      tokenHash: "hashed-token",
+      expiresAt,
+    });
+    await findEmailVerificationTokenByHash("hashed-token");
+    await markEmailVerificationTokenUsed("evt_1", usedAt);
+
+    expect(prisma.emailVerificationToken.create).toHaveBeenCalledWith({
+      data: {
+        userId: "user_1",
+        tokenHash: "hashed-token",
+        expiresAt,
+      },
+      select: {
+        id: true,
+        userId: true,
+        tokenHash: true,
+        expiresAt: true,
+        usedAt: true,
+        createdAt: true,
+      },
+    });
+    expect(prisma.emailVerificationToken.findUnique).toHaveBeenCalledWith({
+      where: { tokenHash: "hashed-token" },
+      select: {
+        id: true,
+        userId: true,
+        tokenHash: true,
+        expiresAt: true,
+        usedAt: true,
+        createdAt: true,
+        user: {
+          select: {
+            id: true,
+            email: true,
+            emailVerifiedAt: true,
+            passwordHash: true,
+            createdAt: true,
+            updatedAt: true,
+          },
+        },
+      },
+    });
+    expect(prisma.emailVerificationToken.update).toHaveBeenCalledWith({
+      where: { id: "evt_1" },
+      data: { usedAt },
+      select: {
+        id: true,
+        userId: true,
+        tokenHash: true,
+        expiresAt: true,
+        usedAt: true,
+        createdAt: true,
+      },
+    });
+  });
+
+  it("marks the user verified and clears unused verification tokens", async () => {
+    const verifiedAt = new Date("2026-04-09T02:00:00.000Z");
+
+    prisma.user.update.mockResolvedValue({
+      id: "user_1",
+      email: "alice@example.com",
+      emailVerifiedAt: verifiedAt,
+      createdAt: new Date("2026-04-08T01:00:00.000Z"),
+      updatedAt: new Date("2026-04-09T02:00:00.000Z"),
+    });
+    prisma.emailVerificationToken.deleteMany.mockResolvedValue({ count: 2 });
+
+    await markUserEmailVerified("user_1", verifiedAt);
+    await deleteUnusedEmailVerificationTokensByUserId("user_1");
+
+    expect(prisma.user.update).toHaveBeenCalledWith({
+      where: { id: "user_1" },
+      data: { emailVerifiedAt: verifiedAt },
+      select: {
+        id: true,
+        email: true,
+        emailVerifiedAt: true,
+        createdAt: true,
+        updatedAt: true,
+      },
+    });
+    expect(prisma.emailVerificationToken.deleteMany).toHaveBeenCalledWith({
+      where: {
+        userId: "user_1",
+        usedAt: null,
+      },
     });
   });
 });

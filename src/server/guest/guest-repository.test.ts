@@ -2,14 +2,17 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const { prisma } = vi.hoisted(() => ({
   prisma: {
+    $transaction: vi.fn(),
     guestSession: {
       create: vi.fn(),
       findFirst: vi.fn(),
       findUnique: vi.fn(),
+      update: vi.fn(),
       updateManyAndReturn: vi.fn(),
     },
     chat: {
       findMany: vi.fn(),
+      updateMany: vi.fn(),
     },
   },
 }));
@@ -19,11 +22,14 @@ vi.mock("@/lib/prisma", () => ({
 }));
 
 import {
+  assignGuestChatsToUser,
   createGuestSession,
   findGuestSessionById,
   findGuestSessionByToken,
   incrementGuestTrialCount,
   listGuestChats,
+  markGuestSessionMerged,
+  mergeGuestSessionIntoUser,
 } from "@/server/guest/guest-repository";
 
 describe("guest-repository", () => {
@@ -168,6 +174,84 @@ describe("guest-repository", () => {
         createdAt: true,
         updatedAt: true,
       },
+    });
+  });
+
+  it("reassigns guest chats to a user account during merge", async () => {
+    prisma.chat.updateMany.mockResolvedValue({ count: 2 });
+
+    await assignGuestChatsToUser("guest_1", "user_1");
+
+    expect(prisma.chat.updateMany).toHaveBeenCalledWith({
+      where: { guestSessionId: "guest_1" },
+      data: {
+        userId: "user_1",
+        guestSessionId: null,
+      },
+    });
+  });
+
+  it("marks a guest session as merged", async () => {
+    const mergedAt = new Date("2026-04-09T03:00:00.000Z");
+    prisma.guestSession.update.mockResolvedValue({
+      id: "guest_1",
+      guestToken: "guest-token",
+      trialMessageCount: 2,
+      mergedAt,
+      expiresAt: new Date("2026-04-22T00:00:00.000Z"),
+      createdAt: new Date("2026-04-08T00:00:00.000Z"),
+      updatedAt: mergedAt,
+    });
+
+    await markGuestSessionMerged("guest_1", mergedAt);
+
+    expect(prisma.guestSession.update).toHaveBeenCalledWith({
+      where: { id: "guest_1" },
+      data: { mergedAt },
+      select: {
+        id: true,
+        guestToken: true,
+        trialMessageCount: true,
+        mergedAt: true,
+        expiresAt: true,
+        createdAt: true,
+        updatedAt: true,
+      },
+    });
+  });
+
+  it("merges guest chats and marks the session merged in one transaction", async () => {
+    const mergedAt = new Date("2026-04-09T03:00:00.000Z");
+    prisma.chat.updateMany.mockResolvedValue({ count: 3 });
+    prisma.guestSession.update.mockResolvedValue({
+      id: "guest_1",
+      guestToken: "guest-token",
+      trialMessageCount: 2,
+      mergedAt,
+      expiresAt: new Date("2026-04-22T00:00:00.000Z"),
+      createdAt: new Date("2026-04-08T00:00:00.000Z"),
+      updatedAt: mergedAt,
+    });
+    prisma.$transaction.mockImplementation(async (callback) => callback(prisma));
+
+    const result = await mergeGuestSessionIntoUser({
+      guestSessionId: "guest_1",
+      userId: "user_1",
+      mergedAt,
+    });
+
+    expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+    expect(result).toEqual({
+      mergedGuestSession: {
+        id: "guest_1",
+        guestToken: "guest-token",
+        trialMessageCount: 2,
+        mergedAt,
+        expiresAt: new Date("2026-04-22T00:00:00.000Z"),
+        createdAt: new Date("2026-04-08T00:00:00.000Z"),
+        updatedAt: mergedAt,
+      },
+      mergedChatCount: 3,
     });
   });
 });

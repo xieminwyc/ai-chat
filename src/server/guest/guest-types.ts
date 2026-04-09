@@ -12,3 +12,14 @@ export type CreateGuestSessionInput = {
   guestToken: string;
   expiresAt: Date;
 };
+
+export type MergeGuestSessionInput = {
+  guestSessionId: string;
+  userId: string;
+  mergedAt: Date;
+};
+
+export type MergeGuestSessionResult = {
+  mergedGuestSession: GuestSessionRecord;
+  mergedChatCount: number;
+};

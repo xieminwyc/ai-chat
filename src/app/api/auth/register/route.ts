@@ -1,15 +1,27 @@
 import { NextResponse } from "next/server";
 import { ZodError } from "zod";
 
+import { sendVerificationEmail } from "@/server/auth/email-delivery";
 import { registerUser } from "@/server/auth/auth-service";
 import { registerSchema } from "@/server/auth/auth-schemas";
 
 export async function POST(request: Request) {
   try {
     const body = registerSchema.parse(await request.json());
-    const user = await registerUser(body);
+    const result = await registerUser(body);
 
-    return NextResponse.json({ user }, { status: 201 });
+    await sendVerificationEmail({
+      email: result.email,
+      verificationUrl: result.verificationUrl,
+    });
+
+    return NextResponse.json(
+      {
+        user: result.user,
+        requiresEmailVerification: true,
+      },
+      { status: 201 },
+    );
   } catch (error) {
     if (error instanceof ZodError) {
       return NextResponse.json({ error: "Invalid registration payload" }, { status: 400 });

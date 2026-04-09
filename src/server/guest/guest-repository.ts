@@ -3,6 +3,8 @@ import type { ChatSummary } from "@/server/chat/chat-types";
 import type {
   CreateGuestSessionInput,
   GuestSessionRecord,
+  MergeGuestSessionInput,
+  MergeGuestSessionResult,
 } from "@/server/guest/guest-types";
 
 const guestSessionSelect = {
@@ -80,5 +82,56 @@ export async function listGuestChats(
       createdAt: true,
       updatedAt: true,
     },
+  });
+}
+
+export async function assignGuestChatsToUser(
+  guestSessionId: string,
+  userId: string,
+) {
+  return prisma.chat.updateMany({
+    where: { guestSessionId },
+    data: {
+      userId,
+      guestSessionId: null,
+    },
+  });
+}
+
+export async function markGuestSessionMerged(
+  guestSessionId: string,
+  mergedAt: Date,
+): Promise<GuestSessionRecord> {
+  return prisma.guestSession.update({
+    where: { id: guestSessionId },
+    data: { mergedAt },
+    select: guestSessionSelect,
+  });
+}
+
+export async function mergeGuestSessionIntoUser({
+  guestSessionId,
+  userId,
+  mergedAt,
+}: MergeGuestSessionInput): Promise<MergeGuestSessionResult> {
+  return prisma.$transaction(async (tx) => {
+    const { count } = await tx.chat.updateMany({
+      where: { guestSessionId },
+      data: {
+        userId,
+        guestSessionId: null,
+      },
+    });
+
+    const mergedGuestSession = await tx.guestSession.update({
+      where: { id: guestSessionId },
+      data: { mergedAt },
+      select: guestSessionSelect,
+    });
+
+    return {
+      mergedGuestSession,
+      mergedChatCount: count,
+    };
   });
 }

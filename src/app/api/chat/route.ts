@@ -3,6 +3,7 @@ import { ZodError } from "zod";
 
 import { getCurrentSession } from "@/server/auth/auth-service";
 import { readSessionTokenFromCookieHeader } from "@/server/auth/session";
+import { requireVerifiedUser } from "@/server/chat/chat-auth";
 import { ForbiddenError, UnauthorizedError } from "@/server/chat/chat-errors";
 import { createStreamingChatResponse } from "@/server/chat/chat-stream";
 import { getDurationMs, logError, logInfo } from "@/server/chat/chat-logger";
@@ -37,6 +38,7 @@ type ResolvedChatActor = {
 
 type ResolveChatActorOptions = {
   allowGuestCreate: boolean;
+  requireVerifiedUser: boolean;
 };
 
 function hasGuestSessionErrorMessage(error: unknown) {
@@ -67,6 +69,10 @@ async function resolveChatActorFromRequest(
   const session = await getCurrentSession(sessionToken);
 
   if (session) {
+    if (options.requireVerifiedUser) {
+      requireVerifiedUser(session.user);
+    }
+
     return {
       owner: { kind: "user", userId: session.user.id },
       guestSession: null,
@@ -186,6 +192,7 @@ export async function GET(request: Request) {
     });
     const actor = await resolveChatActorFromRequest(request, {
       allowGuestCreate: !chatId,
+      requireVerifiedUser: false,
     });
 
     if (!chatId) {
@@ -227,6 +234,7 @@ export async function DELETE(request: Request) {
   try {
     const actor = await resolveChatActorFromRequest(request, {
       allowGuestCreate: false,
+      requireVerifiedUser: false,
     });
     const { searchParams } = new URL(request.url);
     const { chatId } = chatQuerySchema.parse({
@@ -268,6 +276,7 @@ export async function PATCH(request: Request) {
   try {
     const actor = await resolveChatActorFromRequest(request, {
       allowGuestCreate: false,
+      requireVerifiedUser: false,
     });
     const { searchParams } = new URL(request.url);
     const { chatId } = chatQuerySchema.parse({
@@ -313,6 +322,7 @@ export async function POST(request: Request) {
   try {
     const actor = await resolveChatActorFromRequest(request, {
       allowGuestCreate: true,
+      requireVerifiedUser: true,
     });
     const { chatId: requestedChatId, message } = postChatSchema.parse(
       await request.json(),

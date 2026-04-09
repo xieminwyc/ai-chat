@@ -6,10 +6,12 @@ const authService = vi.hoisted(() => ({
 
 const guestService = vi.hoisted(() => ({
   GUEST_MESSAGE_LIMIT: 3,
+  getMergeableGuestSession: vi.fn(),
   getOrCreateGuestSession: vi.fn(),
 }));
 
 const guestSession = vi.hoisted(() => ({
+  readGuestAuthShellFromCookieHeader: vi.fn(),
   getGuestCookieName: vi.fn(),
   getGuestCookieOptions: vi.fn(),
   readGuestTokenFromCookieHeader: vi.fn(),
@@ -32,7 +34,9 @@ describe("/api/auth/session route", () => {
       path: "/",
       maxAge: 14 * 24 * 60 * 60,
     });
+    guestSession.readGuestAuthShellFromCookieHeader.mockReturnValue(false);
     guestSession.readGuestTokenFromCookieHeader.mockReturnValue(null);
+    guestService.getMergeableGuestSession.mockResolvedValue(null);
   });
 
   it("returns the authenticated user when a session is valid", async () => {
@@ -45,6 +49,7 @@ describe("/api/auth/session route", () => {
       user: {
         id: "user_1",
         email: "alice@example.com",
+        emailVerifiedAt: new Date("2026-04-08T03:00:00.000Z"),
         createdAt: new Date("2026-04-08T01:00:00.000Z"),
         updatedAt: new Date("2026-04-08T01:00:00.000Z"),
       },
@@ -66,8 +71,50 @@ describe("/api/auth/session route", () => {
       user: {
         id: "user_1",
         email: "alice@example.com",
+        isEmailVerified: true,
       },
+      mergeCandidate: null,
       guest: null,
+    });
+  });
+
+  it("returns a merge candidate for a verified authenticated user with a guest cookie", async () => {
+    guestSession.readGuestTokenFromCookieHeader.mockReturnValue("guest-token");
+    authService.getCurrentSession.mockResolvedValue({
+      id: "session_1",
+      token: "session-token",
+      userId: "user_1",
+      expiresAt: new Date("2026-04-15T01:00:00.000Z"),
+      createdAt: new Date("2026-04-08T01:00:00.000Z"),
+      user: {
+        id: "user_1",
+        email: "alice@example.com",
+        emailVerifiedAt: new Date("2026-04-08T03:00:00.000Z"),
+        createdAt: new Date("2026-04-08T01:00:00.000Z"),
+        updatedAt: new Date("2026-04-08T01:00:00.000Z"),
+      },
+    });
+    guestService.getMergeableGuestSession.mockResolvedValue({
+      id: "guest_1",
+      guestToken: "guest-token",
+      trialMessageCount: 2,
+    });
+
+    const response = await GET(
+      new Request("http://localhost:3000/api/auth/session", {
+        headers: {
+          cookie: "ai-chat-session=session-token; ai-chat-guest=guest-token",
+        },
+      }),
+    );
+    const data = await response.json();
+
+    expect(guestService.getMergeableGuestSession).toHaveBeenCalledWith(
+      "guest-token",
+    );
+    expect(data.mergeCandidate).toEqual({
+      guestSessionId: "guest_1",
+      trialMessageCount: 2,
     });
   });
 
@@ -98,5 +145,27 @@ describe("/api/auth/session route", () => {
       },
     });
     expect(response.headers.get("set-cookie")).toContain("ai-chat-guest=guest-token");
+  });
+
+  it("returns signed-out auth state without creating a new guest when auth-shell cookie is present", async () => {
+    authService.getCurrentSession.mockResolvedValue(null);
+    guestSession.readGuestAuthShellFromCookieHeader.mockReturnValue(true);
+
+    const response = await GET(
+      new Request("http://localhost:3000/api/auth/session", {
+        headers: {
+          cookie: "ai-chat-auth-shell=1",
+        },
+      }),
+    );
+
+    const data = await response.json();
+
+    expect(guestService.getOrCreateGuestSession).not.toHaveBeenCalled();
+    expect(data).toEqual({
+      authenticated: false,
+      user: null,
+      guest: null,
+    });
   });
 });

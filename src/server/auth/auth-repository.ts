@@ -5,8 +5,33 @@ import type {
   AuthUserRecord,
   AuthUserSummary,
   CreateSessionInput,
+  CreateEmailVerificationTokenInput,
   CreateUserInput,
+  EmailVerificationTokenRecord,
+  EmailVerificationTokenWithUser,
 } from "@/server/auth/auth-types";
+
+const authUserSummarySelect = {
+  id: true,
+  email: true,
+  emailVerifiedAt: true,
+  createdAt: true,
+  updatedAt: true,
+} as const;
+
+const authUserRecordSelect = {
+  ...authUserSummarySelect,
+  passwordHash: true,
+} as const;
+
+const emailVerificationTokenRecordSelect = {
+  id: true,
+  userId: true,
+  tokenHash: true,
+  expiresAt: true,
+  usedAt: true,
+  createdAt: true,
+} as const;
 
 export async function createUser(
   data: CreateUserInput,
@@ -14,12 +39,7 @@ export async function createUser(
   // 创建用户时只返回安全字段，避免 passwordHash 顺手泄露到上层。
   return prisma.user.create({
     data,
-    select: {
-      id: true,
-      email: true,
-      createdAt: true,
-      updatedAt: true,
-    },
+    select: authUserSummarySelect,
   });
 }
 
@@ -29,13 +49,7 @@ export async function findUserByEmail(
   // 登录时需要 passwordHash 做密码比对，所以这里返回完整服务端字段。
   return prisma.user.findUnique({
     where: { email },
-    select: {
-      id: true,
-      email: true,
-      passwordHash: true,
-      createdAt: true,
-      updatedAt: true,
-    },
+    select: authUserRecordSelect,
   });
 }
 
@@ -44,13 +58,7 @@ export async function findUserById(
 ): Promise<AuthUserRecord | null> {
   return prisma.user.findUnique({
     where: { id },
-    select: {
-      id: true,
-      email: true,
-      passwordHash: true,
-      createdAt: true,
-      updatedAt: true,
-    },
+    select: authUserRecordSelect,
   });
 }
 
@@ -83,12 +91,7 @@ export async function findSessionByToken(
       expiresAt: true,
       createdAt: true,
       user: {
-        select: {
-          id: true,
-          email: true,
-          createdAt: true,
-          updatedAt: true,
-        },
+        select: authUserSummarySelect,
       },
     },
   });
@@ -98,5 +101,59 @@ export async function deleteSessionByToken(token: string) {
   // 退出登录时删掉 session，旧 cookie 就算还在，也找不到有效登录态了。
   return prisma.session.deleteMany({
     where: { token },
+  });
+}
+
+export async function createEmailVerificationToken(
+  data: CreateEmailVerificationTokenInput,
+): Promise<EmailVerificationTokenRecord> {
+  return prisma.emailVerificationToken.create({
+    data,
+    select: emailVerificationTokenRecordSelect,
+  });
+}
+
+export async function findEmailVerificationTokenByHash(
+  tokenHash: string,
+): Promise<EmailVerificationTokenWithUser | null> {
+  return prisma.emailVerificationToken.findUnique({
+    where: { tokenHash },
+    select: {
+      ...emailVerificationTokenRecordSelect,
+      user: {
+        select: authUserRecordSelect,
+      },
+    },
+  });
+}
+
+export async function markEmailVerificationTokenUsed(
+  id: string,
+  usedAt: Date,
+): Promise<EmailVerificationTokenRecord> {
+  return prisma.emailVerificationToken.update({
+    where: { id },
+    data: { usedAt },
+    select: emailVerificationTokenRecordSelect,
+  });
+}
+
+export async function deleteUnusedEmailVerificationTokensByUserId(userId: string) {
+  return prisma.emailVerificationToken.deleteMany({
+    where: {
+      userId,
+      usedAt: null,
+    },
+  });
+}
+
+export async function markUserEmailVerified(
+  id: string,
+  emailVerifiedAt: Date,
+): Promise<AuthUserSummary> {
+  return prisma.user.update({
+    where: { id },
+    data: { emailVerifiedAt },
+    select: authUserSummarySelect,
   });
 }

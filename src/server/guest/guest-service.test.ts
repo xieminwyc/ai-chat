@@ -5,6 +5,7 @@ const repository = vi.hoisted(() => ({
   findGuestSessionById: vi.fn(),
   findGuestSessionByToken: vi.fn(),
   incrementGuestTrialCount: vi.fn(),
+  mergeGuestSessionIntoUser: vi.fn(),
 }));
 
 vi.mock("@/server/guest/guest-repository", () => repository);
@@ -13,8 +14,10 @@ import {
   assertGuestMessageQuotaAvailable,
   consumeGuestMessageQuota,
   getCurrentGuestSession,
+  getMergeableGuestSession,
   getOrCreateGuestSession,
   GUEST_MESSAGE_LIMIT,
+  mergeGuestSessionIntoUserAccount,
 } from "@/server/guest/guest-service";
 import {
   createGuestToken,
@@ -172,6 +175,57 @@ describe("guest-service", () => {
     );
 
     await expect(getCurrentGuestSession("merged-token")).resolves.toBeNull();
+  });
+
+  it("detects a mergeable guest session from a valid guest token", async () => {
+    const session = createGuestSessionRecord();
+    repository.findGuestSessionByToken.mockResolvedValue(session);
+
+    await expect(getMergeableGuestSession("guest-token")).resolves.toEqual(session);
+  });
+
+  it("returns null when there is no mergeable guest token", async () => {
+    await expect(getMergeableGuestSession(undefined)).resolves.toBeNull();
+    expect(repository.findGuestSessionByToken).not.toHaveBeenCalled();
+  });
+
+  it("merges guest chats into a verified user account", async () => {
+    const mergedAt = new Date("2026-04-08T00:10:00.000Z");
+    vi.setSystemTime(mergedAt);
+    repository.findGuestSessionById.mockResolvedValue(createGuestSessionRecord());
+    repository.mergeGuestSessionIntoUser.mockResolvedValue({
+      mergedGuestSession: createGuestSessionRecord({
+        mergedAt,
+      }),
+      mergedChatCount: 2,
+    });
+
+    const result = await mergeGuestSessionIntoUserAccount({
+      guestSessionId: "guest_1",
+      userId: "user_1",
+    });
+
+    expect(repository.mergeGuestSessionIntoUser).toHaveBeenCalledWith({
+      guestSessionId: "guest_1",
+      userId: "user_1",
+      mergedAt,
+    });
+    expect(result.mergedChatCount).toBe(2);
+  });
+
+  it("rejects merge for a merged guest session", async () => {
+    repository.findGuestSessionById.mockResolvedValue(
+      createGuestSessionRecord({
+        mergedAt: new Date("2026-04-08T00:05:00.000Z"),
+      }),
+    );
+
+    await expect(
+      mergeGuestSessionIntoUserAccount({
+        guestSessionId: "guest_1",
+        userId: "user_1",
+      }),
+    ).rejects.toThrow("Guest session has already been merged.");
   });
 
   it("increments guest trial count after a successful guest message", async () => {

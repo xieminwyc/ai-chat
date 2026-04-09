@@ -54,6 +54,7 @@ describe("/api/chat route", () => {
       user: {
         id: "user_1",
         email: "alice@example.com",
+        emailVerifiedAt: new Date("2026-04-08T03:00:00.000Z"),
         createdAt: new Date("2026-04-08T01:00:00.000Z"),
         updatedAt: new Date("2026-04-08T01:00:00.000Z"),
       },
@@ -232,6 +233,43 @@ describe("/api/chat route", () => {
     });
     expect(response.status).toBe(200);
     expect(await response.text()).toBe("第一段第二段");
+  });
+
+  it("returns 403 when an authenticated user has not verified their email", async () => {
+    authService.getCurrentSession.mockResolvedValue({
+      id: "session_1",
+      token: "session-token",
+      userId: "user_1",
+      expiresAt: new Date("2026-04-15T01:00:00.000Z"),
+      createdAt: new Date("2026-04-08T01:00:00.000Z"),
+      user: {
+        id: "user_1",
+        email: "alice@example.com",
+        emailVerifiedAt: null,
+        createdAt: new Date("2026-04-08T01:00:00.000Z"),
+        updatedAt: new Date("2026-04-08T01:00:00.000Z"),
+      },
+    });
+
+    const response = await POST(
+      new Request("http://localhost:3000/api/chat", {
+        method: "POST",
+        body: JSON.stringify({
+          message: "继续学习数据库",
+        }),
+        headers: {
+          "Content-Type": "application/json",
+          cookie: "ai-chat-session=session-token",
+        },
+      }),
+    );
+    const data = await response.json();
+
+    expect(response.status).toBe(403);
+    expect(data).toEqual({
+      error: "请先验证邮箱后再继续聊天。",
+    });
+    expect(service.prepareChatReply).not.toHaveBeenCalled();
   });
 
   it("returns 401 when the request has no authenticated session", async () => {

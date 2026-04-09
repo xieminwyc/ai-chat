@@ -3,6 +3,7 @@ export type AuthUserRecord = {
   email: string;
   // 永远只在服务端使用，不应该直接返回给前端。
   passwordHash: string;
+  emailVerifiedAt: Date | null;
   createdAt: Date;
   updatedAt: Date;
 };
@@ -31,5 +32,24 @@ export type CreateUserInput = {
 export type CreateSessionInput = {
   token: string;
   userId: string;
+  expiresAt: Date;
+};
+
+export type EmailVerificationTokenRecord = {
+  id: string;
+  userId: string;
+  tokenHash: string;
+  expiresAt: Date;
+  usedAt: Date | null;
+  createdAt: Date;
+};
+
+export type EmailVerificationTokenWithUser = EmailVerificationTokenRecord & {
+  user: AuthUserRecord;
+};
+
+export type CreateEmailVerificationTokenInput = {
+  userId: string;
+  tokenHash: string;
   expiresAt: Date;
 };

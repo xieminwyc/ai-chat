@@ -3,6 +3,7 @@ import {
   findGuestSessionById,
   findGuestSessionByToken,
   incrementGuestTrialCount,
+  mergeGuestSessionIntoUser,
 } from "@/server/guest/guest-repository";
 import { ForbiddenError, UnauthorizedError } from "@/server/chat/chat-errors";
 import {
@@ -74,6 +75,10 @@ export async function getOrCreateGuestSession(guestToken?: string | null) {
   };
 }
 
+export async function getMergeableGuestSession(guestToken?: string | null) {
+  return getCurrentGuestSession(guestToken);
+}
+
 export async function assertGuestMessageQuotaAvailable(guestSessionId: string) {
   const currentGuestSession = await requireActiveGuestSession(guestSessionId);
 
@@ -99,4 +104,20 @@ export async function consumeGuestMessageQuota(guestSessionId: string) {
   }
 
   return updatedGuestSession;
+}
+
+export async function mergeGuestSessionIntoUserAccount({
+  guestSessionId,
+  userId,
+}: {
+  guestSessionId: string;
+  userId: string;
+}) {
+  await requireActiveGuestSession(guestSessionId);
+
+  return mergeGuestSessionIntoUser({
+    guestSessionId,
+    userId,
+    mergedAt: new Date(),
+  });
 }

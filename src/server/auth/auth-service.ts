@@ -1,10 +1,22 @@
 import {
+  createEmailVerificationToken as createEmailVerificationTokenRecord,
   createSessionRecord,
   createUser,
+  deleteUnusedEmailVerificationTokensByUserId,
   deleteSessionByToken,
+  findEmailVerificationTokenByHash,
   findSessionByToken,
   findUserByEmail,
+  findUserById,
+  markEmailVerificationTokenUsed,
+  markUserEmailVerified,
 } from "@/server/auth/auth-repository";
+import {
+  buildEmailVerificationUrl,
+  createEmailVerificationToken,
+  getEmailVerificationExpiresAt,
+  hashEmailVerificationToken,
+} from "@/server/auth/email-verification";
 import { hashPassword, verifyPassword } from "@/server/auth/password";
 import { createSessionToken, getSessionExpiresAt } from "@/server/auth/session";
 
@@ -23,6 +35,27 @@ function normalizeEmail(email: string) {
   return email.trim().toLowerCase();
 }
 
+async function issueEmailVerificationForUser(user: {
+  id: string;
+  email: string;
+}) {
+  const rawToken = createEmailVerificationToken();
+  const expiresAt = getEmailVerificationExpiresAt();
+  const tokenHash = hashEmailVerificationToken(rawToken);
+
+  await deleteUnusedEmailVerificationTokensByUserId(user.id);
+  await createEmailVerificationTokenRecord({
+    userId: user.id,
+    tokenHash,
+    expiresAt,
+  });
+
+  return {
+    email: user.email,
+    verificationUrl: buildEmailVerificationUrl(rawToken),
+  };
+}
+
 export async function registerUser({ email, password }: RegisterUserInput) {
   const normalizedEmail = normalizeEmail(email);
   const existingUser = await findUserByEmail(normalizedEmail);
@@ -34,10 +67,17 @@ export async function registerUser({ email, password }: RegisterUserInput) {
   // service 层负责把“用户输入的明文密码”转换成“数据库可安全保存的 hash”。
   const passwordHash = await hashPassword(password);
 
-  return createUser({
+  const user = await createUser({
     email: normalizedEmail,
     passwordHash,
   });
+
+  const verification = await issueEmailVerificationForUser(user);
+
+  return {
+    user,
+    ...verification,
+  };
 }
 
 export async function loginUser({ email, password }: LoginUserInput) {
@@ -71,6 +111,7 @@ export async function loginUser({ email, password }: LoginUserInput) {
     user: {
       id: user.id,
       email: user.email,
+      emailVerifiedAt: user.emailVerifiedAt,
       createdAt: user.createdAt,
       updatedAt: user.updatedAt,
     },
@@ -102,4 +143,37 @@ export async function getCurrentSession(sessionToken?: string | null) {
   }
 
   return session;
+}
+
+export async function verifyEmailToken(token: string) {
+  const tokenHash = hashEmailVerificationToken(token);
+  const verificationToken = await findEmailVerificationTokenByHash(tokenHash);
+
+  if (!verificationToken || verificationToken.usedAt) {
+    throw new Error("Verification link is invalid or has already been used");
+  }
+
+  if (verificationToken.expiresAt.getTime() <= Date.now()) {
+    throw new Error("Verification link has expired");
+  }
+
+  const verifiedAt = new Date();
+
+  await markEmailVerificationTokenUsed(verificationToken.id, verifiedAt);
+
+  return markUserEmailVerified(verificationToken.userId, verifiedAt);
+}
+
+export async function resendVerificationEmailForUser(userId: string) {
+  const user = await findUserById(userId);
+
+  if (!user) {
+    throw new Error("User not found");
+  }
+
+  if (user.emailVerifiedAt) {
+    throw new Error("Email is already verified");
+  }
+
+  return issueEmailVerificationForUser(user);
 }

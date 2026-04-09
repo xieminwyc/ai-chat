@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   assertChatOwner,
   requireAuthenticatedUser,
+  requireVerifiedUser,
   UnauthorizedError,
   ForbiddenError,
 } from "@/server/chat/chat-auth";
@@ -18,9 +19,30 @@ describe("chat-auth", () => {
     const user = {
       id: "user_1",
       email: "alice@example.com",
+      emailVerifiedAt: new Date("2026-04-09T01:00:00.000Z"),
     };
 
     expect(requireAuthenticatedUser(user)).toBe(user);
+  });
+
+  it("blocks authenticated users whose email is still unverified", () => {
+    expect(() =>
+      requireVerifiedUser({
+        id: "user_1",
+        email: "alice@example.com",
+        emailVerifiedAt: null,
+      }),
+    ).toThrowError("请先验证邮箱后再继续聊天。");
+  });
+
+  it("returns the verified user when email verification is complete", () => {
+    const user = {
+      id: "user_1",
+      email: "alice@example.com",
+      emailVerifiedAt: new Date("2026-04-09T01:00:00.000Z"),
+    };
+
+    expect(requireVerifiedUser(user)).toBe(user);
   });
 
   it("rejects access to chats owned by another user", () => {

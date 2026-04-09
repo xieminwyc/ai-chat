@@ -8,12 +8,18 @@ import { listChatSummaries, loadChatMessages } from "@/server/chat/chat-service"
 import {
   getCurrentGuestSession,
   GUEST_MESSAGE_LIMIT,
+  getMergeableGuestSession,
 } from "@/server/guest/guest-service";
-import { getGuestCookieName } from "@/server/guest/guest-session";
+import {
+  getGuestAuthShellCookieName,
+  getGuestCookieName,
+} from "@/server/guest/guest-session";
 
 export type HomePageUser = {
   id: string;
   email: string;
+  emailVerifiedAt: string | null;
+  isEmailVerified: boolean;
   createdAt: string;
   updatedAt: string;
 };
@@ -38,6 +44,10 @@ export type HomePageData = {
   viewerKind: ViewerKind;
   isAuthenticated: boolean;
   currentUser: HomePageUser | null;
+  mergeCandidate: {
+    guestSessionId: string;
+    trialMessageCount: number;
+  } | null;
   guestSession: {
     id: string;
     trialMessageCount: number;
@@ -55,12 +65,15 @@ type GetHomePageDataInput = {
 function serializeUser(user: {
   id: string;
   email: string;
+  emailVerifiedAt: Date | null;
   createdAt: Date;
   updatedAt: Date;
 }): HomePageUser {
   return {
     id: user.id,
     email: user.email,
+    emailVerifiedAt: user.emailVerifiedAt?.toISOString() ?? null,
+    isEmailVerified: user.emailVerifiedAt !== null,
     createdAt: user.createdAt.toISOString(),
     updatedAt: user.updatedAt.toISOString(),
   };
@@ -109,6 +122,7 @@ function createGuestHomePageData(
     viewerKind: "guest",
     isAuthenticated: false,
     currentUser: null,
+    mergeCandidate: null,
     guestSession: guestSession
       ? {
           id: guestSession.id,
@@ -119,6 +133,19 @@ function createGuestHomePageData(
     initialChats,
     initialMessages,
     initialChatId,
+  };
+}
+
+function createSignedOutHomePageData(): HomePageData {
+  return {
+    viewerKind: "user",
+    isAuthenticated: false,
+    currentUser: null,
+    mergeCandidate: null,
+    guestSession: null,
+    initialChats: [],
+    initialMessages: [],
+    initialChatId: null,
   };
 }
 
@@ -165,14 +192,30 @@ export async function getHomePageData({
   if (session) {
     const owner: ChatOwner = { kind: "user", userId: session.user.id };
     const initialState = await loadInitialChatState(owner, selectedChatId);
+    const guestToken = cookieStore.get(getGuestCookieName())?.value ?? null;
+    const mergeableGuestSession = session.user.emailVerifiedAt
+      ? await getMergeableGuestSession(guestToken)
+      : null;
 
     return {
       viewerKind: "user",
       isAuthenticated: true,
       currentUser: serializeUser(session.user),
+      mergeCandidate: mergeableGuestSession
+        ? {
+            guestSessionId: mergeableGuestSession.id,
+            trialMessageCount: mergeableGuestSession.trialMessageCount,
+          }
+        : null,
       guestSession: null,
       ...initialState,
     };
+  }
+
+  const shouldPreferAuthShell =
+    cookieStore.get(getGuestAuthShellCookieName())?.value === "1";
+  if (shouldPreferAuthShell) {
+    return createSignedOutHomePageData();
   }
 
   const guestToken = cookieStore.get(getGuestCookieName())?.value ?? null;

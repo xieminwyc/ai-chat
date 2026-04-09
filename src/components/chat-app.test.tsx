@@ -15,9 +15,12 @@ function createInitialData(
     currentUser: {
       id: "user_1",
       email: "alice@example.com",
+      emailVerifiedAt: "2026-04-08T03:00:00.000Z",
+      isEmailVerified: true,
       createdAt: "2026-04-08T01:00:00.000Z",
       updatedAt: "2026-04-08T01:00:00.000Z",
     },
+    mergeCandidate: null,
     guestSession: null,
     initialChats: [],
     initialMessages: [],
@@ -105,6 +108,133 @@ describe("ChatApp", () => {
     expect(screen.getByRole("button", { name: "注册" })).toBeInTheDocument();
   });
 
+  it("shows a verification-required state for authenticated but unverified users", () => {
+    render(
+      <ChatApp
+        initialData={createInitialData({
+          currentUser: {
+            id: "user_1",
+            email: "alice@example.com",
+            emailVerifiedAt: null,
+            isEmailVerified: false,
+            createdAt: "2026-04-08T01:00:00.000Z",
+            updatedAt: "2026-04-08T01:00:00.000Z",
+          },
+        })}
+      />,
+    );
+
+    expect(screen.getByText("请先验证邮箱")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "发送" })).toBeDisabled();
+  });
+
+  it("lets an authenticated unverified user resend the verification email", async () => {
+    const user = userEvent.setup();
+
+    vi.spyOn(global, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ success: true }), {
+        status: 202,
+        headers: {
+          "Content-Type": "application/json",
+        },
+      }),
+    );
+
+    render(
+      <ChatApp
+        initialData={createInitialData({
+          currentUser: {
+            id: "user_1",
+            email: "alice@example.com",
+            emailVerifiedAt: null,
+            isEmailVerified: false,
+            createdAt: "2026-04-08T01:00:00.000Z",
+            updatedAt: "2026-04-08T01:00:00.000Z",
+          },
+        })}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "重新发送验证邮件" }));
+
+    expect(global.fetch).toHaveBeenCalledWith("/api/auth/resend-verification", {
+      method: "POST",
+    });
+    expect(
+      await screen.findByText("验证邮件已重新发送，请检查邮箱。"),
+    ).toBeInTheDocument();
+  });
+
+  it("shows a merge prompt when a verified user has guest history available", () => {
+    render(
+      <ChatApp
+        initialData={createInitialData({
+          mergeCandidate: {
+            guestSessionId: "guest_1",
+            trialMessageCount: 2,
+          },
+        })}
+      />,
+    );
+
+    expect(screen.getByText("检测到游客历史")).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "合并当前游客历史" }),
+    ).toBeInTheDocument();
+  });
+
+  it("merges guest history and refreshes the workspace state", async () => {
+    const user = userEvent.setup();
+
+    vi.spyOn(global, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ success: true, mergedChatCount: 2 }), {
+        status: 200,
+        headers: {
+          "Content-Type": "application/json",
+        },
+      }),
+    );
+
+    render(
+      <ChatApp
+        initialData={createInitialData({
+          mergeCandidate: {
+            guestSessionId: "guest_1",
+            trialMessageCount: 2,
+          },
+        })}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "合并当前游客历史" }));
+
+    expect(global.fetch).toHaveBeenCalledWith("/api/guest/merge", {
+      method: "POST",
+    });
+    expect(
+      await screen.findByText("游客历史已合并到当前账号。"),
+    ).toBeInTheDocument();
+  });
+
+  it("hides the merge prompt when the user chooses not to merge yet", async () => {
+    const user = userEvent.setup();
+
+    render(
+      <ChatApp
+        initialData={createInitialData({
+          mergeCandidate: {
+            guestSessionId: "guest_1",
+            trialMessageCount: 2,
+          },
+        })}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "暂不合并" }));
+
+    expect(screen.queryByText("检测到游客历史")).not.toBeInTheDocument();
+  });
+
   it("renders a usable guest workspace instead of forcing the auth shell", () => {
     render(
       <ChatApp
@@ -123,6 +253,8 @@ describe("ChatApp", () => {
       screen.queryByText("先登录，再开始真正的服务端聊天流程"),
     ).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "发送" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "登录" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "注册" })).toBeInTheDocument();
   });
 
   it("keeps the guest workspace available before a cookie-backed guest session exists", () => {
@@ -141,6 +273,8 @@ describe("ChatApp", () => {
       screen.queryByText("先登录，再开始真正的服务端聊天流程"),
     ).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "发送" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "登录" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "注册" })).toBeInTheDocument();
   });
 
   it("lets a guest send messages before the quota is exhausted", async () => {
@@ -286,6 +420,28 @@ describe("ChatApp", () => {
         .length,
     ).toBeGreaterThan(0);
     expect(screen.getByRole("button", { name: "发送" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "登录" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "注册" })).toBeInTheDocument();
+  });
+
+  it("shows login and register actions when guest quota is exhausted in the empty state", () => {
+    render(
+      <ChatApp
+        initialData={createGuestData({
+          guestSession: {
+            id: "guest_1",
+            trialMessageCount: 3,
+            messageLimit: 3,
+          },
+          initialMessages: [],
+        })}
+      />,
+    );
+
+    expect(
+      (screen.getAllByText("游客试用次数已用完，注册后可继续聊天并保存历史"))
+        .length,
+    ).toBeGreaterThan(0);
     expect(screen.getByRole("button", { name: "登录" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "注册" })).toBeInTheDocument();
   });

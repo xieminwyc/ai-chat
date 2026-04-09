@@ -4,6 +4,7 @@ import type { ChatOwner } from "@/server/chat/chat-types";
 type MinimalUser = {
   id: string;
   email: string;
+  emailVerifiedAt?: Date | null;
 };
 
 type MinimalChat = {
@@ -15,12 +16,24 @@ type MinimalChat = {
 
 export { ForbiddenError, UnauthorizedError };
 
+const emailVerificationRequiredMessage = "请先验证邮箱后再继续聊天。";
+
 export function requireAuthenticatedUser(user: MinimalUser | null) {
   if (!user) {
     throw new UnauthorizedError();
   }
 
   return user;
+}
+
+export function requireVerifiedUser(user: MinimalUser | null) {
+  const authenticatedUser = requireAuthenticatedUser(user);
+
+  if (authenticatedUser.emailVerifiedAt == null) {
+    throw new ForbiddenError(emailVerificationRequiredMessage);
+  }
+
+  return authenticatedUser;
 }
 
 export function assertChatOwner(chat: MinimalChat | null, owner: ChatOwner) {
