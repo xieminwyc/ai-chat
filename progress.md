@@ -198,3 +198,47 @@
 - 先把 `resolveProtectedPageAccess()` 真正接到第一个受保护页面，例如 `/account` 或 `/settings`
 - 再决定是否需要引入轻量 `proxy.ts`，只做 redirect，不接管完整鉴权
 - 若要继续收口工程配置，可顺手清掉 `src/server/chat/chat-auth.test.ts` 里的未使用导入 warning
+
+## Session: 2026-04-10 (Protected Pages)
+
+### Phase 1: Protected Page Design & Plan
+- **Status:** complete
+- Actions taken:
+  - 新增 protected pages 设计文档，明确 `/account` 采用 `authenticated` 门槛，`/settings` 采用 `verified` 门槛
+  - 结合现有 `entry-state` 和 `resolveProtectedPageAccess()` 能力，确定本轮直接使用页面级 Server Component 守卫，不引入 `proxy.ts`
+  - 新增实现计划文档，按 TDD 顺序拆出 `/account`、`/settings` 和最终验证任务
+- Files created/modified:
+  - `docs/superpowers/specs/2026-04-10-protected-pages-design.md` (created)
+  - `docs/superpowers/plans/2026-04-10-protected-pages-implementation.md` (created)
+
+### Phase 2: Protected Page Implementation
+- **Status:** complete
+- Actions taken:
+  - 新增 `src/app/account/page.tsx`，在 Server Component 中读取 cookie、解析 entry state，并对 `authenticated` 访问要求执行重定向保护
+  - 新增 `src/app/settings/page.tsx`，在 Server Component 中读取 cookie、解析 entry state，并对 `verified` 访问要求执行重定向保护
+  - 新增 `src/app/account/page.test.tsx` 和 `src/app/settings/page.test.tsx`，覆盖未登录重定向、未验证访问限制与已验证渲染路径
+  - 构建阶段发现 `/account` 需要显式状态收窄后，补上联合类型保护分支，保证 Next.js 16 构建通过
+- Files created/modified:
+  - `src/app/account/page.tsx` (created)
+  - `src/app/account/page.test.tsx` (created)
+  - `src/app/settings/page.tsx` (created)
+  - `src/app/settings/page.test.tsx` (created)
+  - `progress.md` (updated)
+
+### Phase 3: Verification
+- **Status:** complete with one pre-existing lint warning
+- Actions taken:
+  - 运行 `npm test -- src/app/account/page.test.tsx`，3 个测试通过
+  - 运行 `npm test -- src/app/settings/page.test.tsx`，3 个测试通过
+  - 运行 `npm test -- src/app/account/page.test.tsx src/app/settings/page.test.tsx`，6 个测试通过
+  - 运行 `npm test -- src/server/auth/entry-state.test.ts`，11 个测试通过
+  - 运行 `npm test -- src/app/api/auth/session/route.test.ts`，7 个测试通过
+  - 运行 `npm run build`，新增 `/account` 和 `/settings` 路由后构建通过
+  - 运行 `npm run lint`，仍有 `src/server/chat/chat-auth.test.ts` 的未使用导入 warning，与本次页面切片无直接关联
+- Files created/modified:
+  - `progress.md` (updated)
+
+### Next Suggested Slice
+- 给首页或导航增加到 `/account` 和 `/settings` 的入口，让受保护页面从“可访问”变成“可发现”
+- 如果接下来要做真实设置项，优先把邮箱重发验证、登出其他设备、密码修改这类敏感动作放进 `/settings`
+- 若要继续提升工程整洁度，可先清理 `src/server/chat/chat-auth.test.ts` 的旧 lint warning
