@@ -157,3 +157,14 @@ export async function markUserEmailVerified(
     select: authUserSummarySelect,
   });
 }
+
+export async function updateUserPasswordHash(
+  id: string,
+  passwordHash: string,
+): Promise<AuthUserSummary> {
+  return prisma.user.update({
+    where: { id },
+    data: { passwordHash },
+    select: authUserSummarySelect,
+  });
+}

@@ -324,3 +324,55 @@
 - 开始给 `/settings` 落第一批 verified-only 设置项，例如密码修改或更高信任动作入口
 - 如果 `/account` 继续扩展，可再补最近登录时间、会话概览或账号安全说明
 - 若想先清工程噪音，可把 `src/server/chat/chat-auth.test.ts` 的旧 lint warning 一并处理掉
+
+## Session: 2026-04-10 (Settings Password And Security Roadmap)
+
+### Phase 1: Design, Plan, And Learning Map
+- **Status:** complete
+- Actions taken:
+  - 新增 `/settings` 设计文档，确定采用“真实修改密码 + 两个安全路线图占位”的收口方案
+  - 新增实现计划文档，明确后端 route/service/repository 和前端表单组件一起落地
+  - 新增后端学习地图文档，总结 AI 工程师视角下最值得优先理解的后端难点
+- Files created/modified:
+  - `docs/superpowers/specs/2026-04-10-settings-password-and-security-roadmap-design.md` (created)
+  - `docs/superpowers/plans/2026-04-10-settings-password-and-security-roadmap-implementation.md` (created)
+  - `docs/superpowers/specs/2026-04-10-backend-learning-map-for-ai-engineer.md` (created)
+
+### Phase 2: Password Change Flow
+- **Status:** complete
+- Actions taken:
+  - 新增 `POST /api/auth/password` route，接入 session 恢复、payload 校验和改密码 service
+  - 在 auth service 中新增修改密码能力，校验旧密码、阻止新旧密码相同，并写入新 hash
+  - 在 auth repository 中新增更新用户密码 hash 的 helper
+  - 新增 `src/app/settings/password-form.tsx`，完成修改密码交互、loading 和反馈展示
+  - 更新 `src/app/settings/page.tsx`，把 settings 页升级为真实密码区 + 安全路线图区
+- Files created/modified:
+  - `src/app/api/auth/password/route.ts` (created)
+  - `src/app/api/auth/password/route.test.ts` (created)
+  - `src/app/settings/password-form.tsx` (created)
+  - `src/app/settings/password-form.test.tsx` (created)
+  - `src/app/settings/page.tsx` (updated)
+  - `src/app/settings/page.test.tsx` (updated)
+  - `src/server/auth/auth-schemas.ts` (updated)
+  - `src/server/auth/auth-service.ts` (updated)
+  - `src/server/auth/auth-service.test.ts` (updated)
+  - `src/server/auth/auth-repository.ts` (updated)
+  - `progress.md` (updated)
+
+### Phase 3: Verification
+- **Status:** complete with one pre-existing lint warning
+- Actions taken:
+  - 运行 `npm test -- src/server/auth/auth-service.test.ts`，13 个测试通过
+  - 运行 `npm test -- src/app/api/auth/password/route.test.ts`，3 个测试通过
+  - 运行 `npm test -- src/app/settings/password-form.test.tsx`，2 个测试通过
+  - 运行 `npm test -- src/app/settings/page.test.tsx`，3 个测试通过
+  - 运行 `npm test -- src/app/settings/password-form.test.tsx src/app/settings/page.test.tsx src/app/account/page.test.tsx src/components/chat-app.test.tsx`，38 个测试通过
+  - 运行 `npm run build`，新增 `/api/auth/password` 后构建通过
+  - 运行 `npm run lint`，仍有 `src/server/chat/chat-auth.test.ts` 的旧 warning，与本轮设置页改动无直接关联
+- Files created/modified:
+  - `progress.md` (updated)
+
+### Next Suggested Slice
+- 如果继续做产品功能，下一步可给 `/settings` 增加更真实的安全项，例如设备管理或更高信任确认动作
+- 如果继续走学习主线，优先复盘 auth boundary、状态一致性和请求链路三块后端难点
+- 若想让仓库更干净，可先处理 `src/server/chat/chat-auth.test.ts` 的旧 lint warning 和那份学习文档里的手动误改

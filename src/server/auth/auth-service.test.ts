@@ -12,6 +12,7 @@ const repository = vi.hoisted(() => ({
   findUserById: vi.fn(),
   markEmailVerificationTokenUsed: vi.fn(),
   markUserEmailVerified: vi.fn(),
+  updateUserPasswordHash: vi.fn(),
 }));
 
 const password = vi.hoisted(() => ({
@@ -37,6 +38,7 @@ vi.mock("@/server/auth/password", () => password);
 vi.mock("@/server/auth/session", () => session);
 
 import {
+  changePasswordForUser,
   getCurrentSession,
   loginUser,
   logoutUser,
@@ -315,5 +317,78 @@ describe("auth-service", () => {
     expect(result.verificationUrl).toBe(
       "http://localhost:3000/verify-email?token=verification-token-2",
     );
+  });
+
+  it("rejects password change when the current password is wrong", async () => {
+    repository.findUserById.mockResolvedValue({
+      id: "user_1",
+      email: "alice@example.com",
+      emailVerifiedAt: new Date("2026-04-08T01:00:00.000Z"),
+      passwordHash: "hashed-password",
+      createdAt: new Date("2026-04-07T00:00:00.000Z"),
+      updatedAt: new Date("2026-04-07T00:00:00.000Z"),
+    });
+    password.verifyPassword.mockResolvedValue(false);
+
+    await expect(
+      changePasswordForUser({
+        userId: "user_1",
+        currentPassword: "wrong-password",
+        nextPassword: "brand-new-password",
+      }),
+    ).rejects.toThrow("Current password is incorrect");
+  });
+
+  it("rejects password change when the next password matches the current password", async () => {
+    repository.findUserById.mockResolvedValue({
+      id: "user_1",
+      email: "alice@example.com",
+      emailVerifiedAt: new Date("2026-04-08T01:00:00.000Z"),
+      passwordHash: "hashed-password",
+      createdAt: new Date("2026-04-07T00:00:00.000Z"),
+      updatedAt: new Date("2026-04-07T00:00:00.000Z"),
+    });
+    password.verifyPassword.mockResolvedValue(true);
+
+    await expect(
+      changePasswordForUser({
+        userId: "user_1",
+        currentPassword: "same-password",
+        nextPassword: "same-password",
+      }),
+    ).rejects.toThrow("New password must be different");
+  });
+
+  it("hashes and updates the password when change succeeds", async () => {
+    repository.findUserById.mockResolvedValue({
+      id: "user_1",
+      email: "alice@example.com",
+      emailVerifiedAt: new Date("2026-04-08T01:00:00.000Z"),
+      passwordHash: "hashed-password",
+      createdAt: new Date("2026-04-07T00:00:00.000Z"),
+      updatedAt: new Date("2026-04-07T00:00:00.000Z"),
+    });
+    password.verifyPassword.mockResolvedValue(true);
+    password.hashPassword.mockResolvedValue("new-hash");
+    repository.updateUserPasswordHash.mockResolvedValue({
+      id: "user_1",
+      email: "alice@example.com",
+      emailVerifiedAt: new Date("2026-04-08T01:00:00.000Z"),
+      createdAt: new Date("2026-04-07T00:00:00.000Z"),
+      updatedAt: new Date("2026-04-10T00:00:00.000Z"),
+    });
+
+    const result = await changePasswordForUser({
+      userId: "user_1",
+      currentPassword: "old-password",
+      nextPassword: "brand-new-password",
+    });
+
+    expect(password.hashPassword).toHaveBeenCalledWith("brand-new-password");
+    expect(repository.updateUserPasswordHash).toHaveBeenCalledWith(
+      "user_1",
+      "new-hash",
+    );
+    expect(result.email).toBe("alice@example.com");
   });
 });

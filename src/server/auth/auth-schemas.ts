@@ -11,3 +11,14 @@ export const loginSchema = z.object({
   email: z.string().trim().email(),
   password: z.string().min(1),
 });
+
+export const changePasswordSchema = z
+  .object({
+    currentPassword: z.string().min(1),
+    nextPassword: z.string().min(8).max(72),
+    confirmPassword: z.string().min(1),
+  })
+  .refine((data) => data.nextPassword === data.confirmPassword, {
+    message: "Passwords do not match",
+    path: ["confirmPassword"],
+  });

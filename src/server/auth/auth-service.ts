@@ -10,6 +10,7 @@ import {
   findUserById,
   markEmailVerificationTokenUsed,
   markUserEmailVerified,
+  updateUserPasswordHash,
 } from "@/server/auth/auth-repository";
 import {
   buildEmailVerificationUrl,
@@ -176,4 +177,37 @@ export async function resendVerificationEmailForUser(userId: string) {
   }
 
   return issueEmailVerificationForUser(user);
+}
+
+export async function changePasswordForUser({
+  userId,
+  currentPassword,
+  nextPassword,
+}: {
+  userId: string;
+  currentPassword: string;
+  nextPassword: string;
+}) {
+  const user = await findUserById(userId);
+
+  if (!user) {
+    throw new Error("User not found");
+  }
+
+  const passwordMatches = await verifyPassword(
+    currentPassword,
+    user.passwordHash,
+  );
+
+  if (!passwordMatches) {
+    throw new Error("Current password is incorrect");
+  }
+
+  if (currentPassword === nextPassword) {
+    throw new Error("New password must be different");
+  }
+
+  const nextPasswordHash = await hashPassword(nextPassword);
+
+  return updateUserPasswordHash(userId, nextPasswordHash);
 }
