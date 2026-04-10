@@ -82,7 +82,12 @@ SILICONFLOW_BASE_URL=
 SILICONFLOW_MODEL=
 ```
 
-真实线上密钥不要提交进仓库。Docker Compose 线上部署时，服务器本地的 `.env.production` 需要提供这些真实值。
+仓库中只保留 `.env.example`。`.env.local`、`.env.test`、`.env.production` 都应当只存在于本机或服务器，不要提交进仓库。
+
+Docker Compose 线上部署时：
+
+- GitHub Actions 使用 `PRODUCTION_DATABASE_URL` secret 执行 migration
+- 服务器本地 `/root/apps/ai-chat/.env.production` 提供运行时真实值
 
 ## Scripts
 
@@ -212,6 +217,13 @@ CI 只使用安全占位值，不使用真实生产密钥。
 - `SERVER_PORT`
 - `SERVER_USER`
 - `SERVER_SSH_KEY`
+
+### Runtime Env Placement
+
+- 仓库：只保留 `.env.example`
+- 本地开发：自己创建 `.env.local`
+- 本地测试/演练：按需自己创建 `.env.test` / `.env.production`
+- 服务器运行时：维护 `/root/apps/ai-chat/.env.production`
 
 ## Testing and Verification
 
