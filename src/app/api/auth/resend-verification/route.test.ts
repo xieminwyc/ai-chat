@@ -11,6 +11,16 @@ const authSession = vi.hoisted(() => ({
 
 const emailDelivery = vi.hoisted(() => ({
   sendVerificationEmail: vi.fn(),
+  isEmailDeliveryError: vi.fn((error: unknown) => {
+    return (
+      error instanceof Error &&
+      (
+        error.message === "RESEND_API_KEY is required to send verification emails." ||
+        error.message === "RESEND_FROM_EMAIL is required to send verification emails." ||
+        error.message.startsWith("Failed to send verification email:")
+      )
+    );
+  }),
 }));
 
 vi.mock("@/server/auth/auth-service", () => authService);
@@ -66,5 +76,44 @@ describe("/api/auth/resend-verification route", () => {
       verificationUrl: "http://localhost:3000/verify-email?token=verify-token",
     });
     expect(data).toEqual({ success: true });
+  });
+
+  it("returns 500 when resend email delivery is not configured", async () => {
+    authService.getCurrentSession.mockResolvedValue({
+      id: "session_1",
+      token: "session-token",
+      userId: "user_1",
+      expiresAt: new Date("2026-04-15T01:00:00.000Z"),
+      createdAt: new Date("2026-04-08T01:00:00.000Z"),
+      user: {
+        id: "user_1",
+        email: "alice@example.com",
+        emailVerifiedAt: null,
+        createdAt: new Date("2026-04-08T01:00:00.000Z"),
+        updatedAt: new Date("2026-04-08T01:00:00.000Z"),
+      },
+    });
+    authService.resendVerificationEmailForUser.mockResolvedValue({
+      email: "alice@example.com",
+      verificationUrl: "http://localhost:3000/verify-email?token=verify-token",
+    });
+    emailDelivery.sendVerificationEmail.mockRejectedValue(
+      new Error("RESEND_API_KEY is required to send verification emails."),
+    );
+
+    const response = await POST(
+      new Request("http://localhost:3000/api/auth/resend-verification", {
+        method: "POST",
+        headers: {
+          cookie: "ai-chat-session=session-token",
+        },
+      }),
+    );
+    const data = await response.json();
+
+    expect(response.status).toBe(500);
+    expect(data).toEqual({
+      error: "RESEND_API_KEY is required to send verification emails.",
+    });
   });
 });

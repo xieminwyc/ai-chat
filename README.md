@@ -73,13 +73,16 @@ http://localhost:3000
 目前需要的关键变量：
 
 ```env
+APP_URL=
 DATABASE_URL=
+RESEND_API_KEY=
+RESEND_FROM_EMAIL=
 SILICONFLOW_API_KEY=
 SILICONFLOW_BASE_URL=
 SILICONFLOW_MODEL=
 ```
 
-真实线上密钥不要写进 `.env.example`、`.env.test` 或 `.env.production`。线上仍然由服务器本地的 `.env.local` 提供真实值。
+真实线上密钥不要提交进仓库。Docker Compose 线上部署时，服务器本地的 `.env.production` 需要提供这些真实值。
 
 ## Scripts
 
@@ -144,7 +147,7 @@ Browser
 
 - PM2 托管 `next start`
 - Nginx 反向代理到 3000 端口
-- 服务器本地 `.env.local` 保存真实生产环境变量
+- 服务器本地 `.env.production` 保存真实生产环境变量
 
 仓库中的 `scripts/deploy.sh` 是标准部署脚本模板，线上建议放在：
 
@@ -196,13 +199,15 @@ CI 只使用安全占位值，不使用真实生产密钥。
 
 部署方式：
 
+- GitHub Actions 先对生产数据库执行 `prisma migrate deploy`
 - GitHub Actions 通过 SSH 登录阿里云服务器
-- 执行服务器上的 `scripts/deploy.sh`
+- 执行服务器上的 `scripts/docker-deploy.sh`
 
 ### Required GitHub Secrets
 
 需要在 GitHub 仓库中配置：
 
+- `PRODUCTION_DATABASE_URL`
 - `SERVER_HOST`
 - `SERVER_PORT`
 - `SERVER_USER`

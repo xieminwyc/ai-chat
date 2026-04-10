@@ -26,7 +26,26 @@ jobs:
         github.event.workflow_run.head_branch == 'main'
       }}
     runs-on: ubuntu-latest
+    env:
+      DATABASE_URL: ${{ secrets.PRODUCTION_DATABASE_URL }}
     steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run Prisma migrations
+        run: APP_ENV=production node scripts/env.mjs npx prisma migrate deploy
+
       # 准备 SSH 登录服务器所需的私钥和 known_hosts。
       - name: Prepare SSH
         env:
@@ -42,7 +61,7 @@ jobs:
           ssh-keyscan -p "$SERVER_PORT" -H "$SERVER_HOST" >> ~/.ssh/known_hosts
 
       # SSH 进服务器，执行 docker-deploy.sh。
-      # 脚本负责：登录 GHCR → docker compose pull → docker compose up -d → 健康检查
+      # Prisma migration 已在 Actions 中完成，服务器脚本只负责更新代码、拉镜像、重启容器和健康检查。
       - name: Deploy on server
         env:
           SERVER_HOST: ${{ secrets.SERVER_HOST }}

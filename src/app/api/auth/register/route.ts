@@ -1,9 +1,19 @@
 import { NextResponse } from "next/server";
 import { ZodError } from "zod";
 
-import { sendVerificationEmail } from "@/server/auth/email-delivery";
+import {
+  isEmailDeliveryError,
+  sendVerificationEmail,
+} from "@/server/auth/email-delivery";
 import { registerUser } from "@/server/auth/auth-service";
 import { registerSchema } from "@/server/auth/auth-schemas";
+
+function isDuplicateRegistrationError(error: unknown): error is Error {
+  return (
+    error instanceof Error &&
+    error.message === "A user with this email already exists"
+  );
+}
 
 export async function POST(request: Request) {
   try {
@@ -27,10 +37,17 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Invalid registration payload" }, { status: 400 });
     }
 
-    if (error instanceof Error) {
+    if (isDuplicateRegistrationError(error)) {
       return NextResponse.json({ error: error.message }, { status: 409 });
     }
 
-    return NextResponse.json({ error: "Register route failed" }, { status: 500 });
+    if (isEmailDeliveryError(error)) {
+      return NextResponse.json({ error: error.message }, { status: 500 });
+    }
+
+    return NextResponse.json(
+      { error: error instanceof Error ? error.message : "Register route failed" },
+      { status: 500 },
+    );
   }
 }

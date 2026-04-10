@@ -3,8 +3,8 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-DOCKERFILE_PATH="${ROOT_DIR}/Dockerfile"
 DEPLOY_SCRIPT_PATH="${ROOT_DIR}/scripts/docker-deploy.sh"
+DEPLOY_WORKFLOW_PATH="${ROOT_DIR}/.github/workflows/deploy.yml"
 
 assert_contains() {
   local file_path="$1"
@@ -16,12 +16,19 @@ assert_contains() {
   fi
 }
 
-assert_contains "${DOCKERFILE_PATH}" 'COPY --from=builder --chown=nextjs:nodejs /app/node_modules/prisma ./node_modules/prisma'
-assert_contains "${DOCKERFILE_PATH}" 'COPY --from=builder --chown=nextjs:nodejs /app/prisma.config.ts ./prisma.config.ts'
-assert_contains "${DOCKERFILE_PATH}" 'COPY --from=builder --chown=nextjs:nodejs /app/scripts/env.mjs ./scripts/env.mjs'
-
 assert_contains "${DEPLOY_SCRIPT_PATH}" 'git fetch origin main'
 assert_contains "${DEPLOY_SCRIPT_PATH}" 'git reset --hard origin/main'
-assert_contains "${DEPLOY_SCRIPT_PATH}" 'node node_modules/prisma/build/index.js migrate deploy --schema=prisma/schema.prisma'
+assert_contains "${DEPLOY_SCRIPT_PATH}" 'set -a'
+assert_contains "${DEPLOY_SCRIPT_PATH}" '. "$ENV_FILE"'
+assert_contains "${DEPLOY_SCRIPT_PATH}" 'require_env_var "APP_URL"'
+assert_contains "${DEPLOY_SCRIPT_PATH}" 'require_env_var "RESEND_API_KEY"'
+assert_contains "${DEPLOY_SCRIPT_PATH}" 'require_env_var "RESEND_FROM_EMAIL"'
+
+assert_contains "${DEPLOY_WORKFLOW_PATH}" 'Set up Node.js'
+assert_contains "${DEPLOY_WORKFLOW_PATH}" 'Install dependencies'
+assert_contains "${DEPLOY_WORKFLOW_PATH}" 'Run Prisma migrations'
+assert_contains "${DEPLOY_WORKFLOW_PATH}" 'ref: ${{ github.event.workflow_run.head_sha }}'
+assert_contains "${DEPLOY_WORKFLOW_PATH}" 'DATABASE_URL: ${{ secrets.PRODUCTION_DATABASE_URL }}'
+assert_contains "${DEPLOY_WORKFLOW_PATH}" 'APP_ENV=production node scripts/env.mjs npx prisma migrate deploy'
 
 echo "docker deploy runtime regression checks passed"

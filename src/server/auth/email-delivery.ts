@@ -5,6 +5,11 @@ type SendVerificationEmailInput = {
   verificationUrl: string;
 };
 
+const resendConfigurationErrorMessages = [
+  "RESEND_API_KEY is required to send verification emails.",
+  "RESEND_FROM_EMAIL is required to send verification emails.",
+];
+
 function getResendApiKey() {
   const apiKey = process.env.RESEND_API_KEY;
 
@@ -25,6 +30,26 @@ function getResendFromEmail() {
   }
 
   return fromEmail;
+}
+
+export function isEmailDeliveryConfigurationError(
+  error: unknown,
+): error is Error {
+  return (
+    error instanceof Error &&
+    resendConfigurationErrorMessages.includes(error.message)
+  );
+}
+
+export function isEmailDeliveryError(error: unknown): error is Error {
+  if (!(error instanceof Error)) {
+    return false;
+  }
+
+  return (
+    resendConfigurationErrorMessages.includes(error.message) ||
+    error.message.startsWith("Failed to send verification email:")
+  );
 }
 
 export async function sendVerificationEmail({
