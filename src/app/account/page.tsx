@@ -5,6 +5,15 @@ import {
   resolveEntryStateFromCookieStore,
   resolveProtectedPageAccess,
 } from "@/server/auth/entry-state";
+import { VerificationAction } from "@/app/account/verification-action";
+
+function formatAccountDate(date: Date) {
+  return new Intl.DateTimeFormat("zh-CN", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(date);
+}
 
 export default async function AccountPage() {
   const cookieStore = await cookies();
@@ -24,6 +33,7 @@ export default async function AccountPage() {
 
   const user = entryState.user;
   const verificationLabel = user.emailVerifiedAt ? "邮箱已验证" : "邮箱未验证";
+  const createdAtLabel = formatAccountDate(user.createdAt);
 
   return (
     <main className="mx-auto flex min-h-screen w-full max-w-3xl flex-col gap-6 px-6 py-16">
@@ -38,6 +48,15 @@ export default async function AccountPage() {
       </header>
 
       <section className="grid gap-4 rounded-3xl border border-neutral-200 bg-white p-6 shadow-sm">
+        <div className="space-y-2">
+          <p className="text-xs uppercase tracking-[0.25em] text-neutral-500">
+            Account Overview
+          </p>
+          <h2 className="text-2xl font-semibold text-neutral-950">
+            基础账号信息
+          </h2>
+        </div>
+
         <div className="space-y-1">
           <p className="text-xs uppercase tracking-[0.25em] text-neutral-500">
             User ID
@@ -58,7 +77,16 @@ export default async function AccountPage() {
           </p>
           <p className="text-base text-neutral-900">{verificationLabel}</p>
         </div>
+
+        <div className="space-y-1">
+          <p className="text-xs uppercase tracking-[0.25em] text-neutral-500">
+            注册时间
+          </p>
+          <p className="text-base text-neutral-900">{createdAtLabel}</p>
+        </div>
       </section>
+
+      <VerificationAction isEmailVerified={user.emailVerifiedAt !== null} />
     </main>
   );
 }

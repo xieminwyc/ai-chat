@@ -283,3 +283,44 @@
 - 给 `/account` 增加真实账号信息模块，比如注册时间、验证状态说明和后续安全操作入口
 - 给 `/settings` 落第一组真实设置项，优先考虑邮箱验证相关动作或密码修改
 - 若后面受保护页面继续变多，再考虑抽离更统一的账号导航或轻量 `proxy.ts`
+
+## Session: 2026-04-10 (Account Overview And Verification Action)
+
+### Phase 1: Design, Plan, And Learning Notes
+- **Status:** complete
+- Actions taken:
+  - 新增 `/account` 内容增强设计文档，确定采用 Server Component + 小型 Client Component 的分工
+  - 新增学习文档，梳理为什么验证动作优先放进 `/account`
+  - 新增实现计划文档，明确先做验证动作组件，再增强账号页概览
+- Files created/modified:
+  - `docs/superpowers/specs/2026-04-10-account-overview-and-verification-action-design.md` (created)
+  - `docs/superpowers/specs/2026-04-10-account-overview-and-verification-action-learning.md` (created)
+  - `docs/superpowers/plans/2026-04-10-account-overview-and-verification-action-implementation.md` (created)
+
+### Phase 2: Account Page Enhancement
+- **Status:** complete
+- Actions taken:
+  - 新增 `src/app/account/verification-action.tsx`，封装重新发送验证邮件按钮、loading 和成功/失败反馈
+  - 更新 `src/app/account/page.tsx`，补充账号概览区、注册时间显示，并接入验证动作组件
+  - 为账号页与验证动作组件分别补充测试
+- Files created/modified:
+  - `src/app/account/verification-action.tsx` (created)
+  - `src/app/account/verification-action.test.tsx` (created)
+  - `src/app/account/page.tsx` (updated)
+  - `src/app/account/page.test.tsx` (updated)
+  - `progress.md` (updated)
+
+### Phase 3: Verification
+- **Status:** complete with one pre-existing lint warning
+- Actions taken:
+  - 运行 `npm test -- src/app/account/verification-action.test.tsx src/app/account/page.test.tsx`，6 个测试通过
+  - 运行 `npm test -- src/components/chat-app.test.tsx`，30 个测试通过
+  - 运行 `npm run build`，构建通过
+  - 运行 `npm run lint`，仍有 `src/server/chat/chat-auth.test.ts` 的未使用导入 warning，与本轮改动无直接关联
+- Files created/modified:
+  - `progress.md` (updated)
+
+### Next Suggested Slice
+- 开始给 `/settings` 落第一批 verified-only 设置项，例如密码修改或更高信任动作入口
+- 如果 `/account` 继续扩展，可再补最近登录时间、会话概览或账号安全说明
+- 若想先清工程噪音，可把 `src/server/chat/chat-auth.test.ts` 的旧 lint warning 一并处理掉

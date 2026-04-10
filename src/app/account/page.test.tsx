@@ -72,7 +72,11 @@ describe("/account page", () => {
     ).toBeInTheDocument();
     expect(screen.getByText("alice@example.com")).toBeInTheDocument();
     expect(screen.getByText("user_1")).toBeInTheDocument();
-    expect(screen.getByText("邮箱未验证")).toBeInTheDocument();
+    expect(screen.getAllByText("邮箱未验证")).toHaveLength(2);
+    expect(screen.getByText("注册时间")).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "重新发送验证邮件" }),
+    ).toBeInTheDocument();
   });
 
   it("renders verified status for an authenticated verified user", async () => {
@@ -95,6 +99,7 @@ describe("/account page", () => {
     render(await AccountPage());
 
     expect(screen.getByText("bob@example.com")).toBeInTheDocument();
-    expect(screen.getByText("邮箱已验证")).toBeInTheDocument();
+    expect(screen.getAllByText("邮箱已验证")).toHaveLength(2);
+    expect(screen.getByText("当前账号已经完成验证，无需额外操作。")).toBeInTheDocument();
   });
 });
