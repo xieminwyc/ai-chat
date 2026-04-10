@@ -242,3 +242,44 @@
 - 给首页或导航增加到 `/account` 和 `/settings` 的入口，让受保护页面从“可访问”变成“可发现”
 - 如果接下来要做真实设置项，优先把邮箱重发验证、登出其他设备、密码修改这类敏感动作放进 `/settings`
 - 若要继续提升工程整洁度，可先清理 `src/server/chat/chat-auth.test.ts` 的旧 lint warning
+
+## Session: 2026-04-10 (Account Entry Navigation)
+
+### Phase 1: Navigation Design & Learning Notes
+- **Status:** complete
+- Actions taken:
+  - 新增账号入口导航设计文档，确定把 `/account` 和 `/settings` 放进工作台头部右上角用户区
+  - 新增学习文档，说明“前端入口可见性”和“服务端页面保护”是两层职责
+  - 新增实现计划文档，明确本轮只改 `ChatApp` 头部入口，不重构左侧聊天栏或全站导航
+- Files created/modified:
+  - `docs/superpowers/specs/2026-04-10-account-entry-navigation-design.md` (created)
+  - `docs/superpowers/specs/2026-04-10-account-entry-navigation-learning.md` (created)
+  - `docs/superpowers/plans/2026-04-10-account-entry-navigation-implementation.md` (created)
+
+### Phase 2: Header Navigation Implementation
+- **Status:** complete
+- Actions taken:
+  - 在 `src/components/chat-app.tsx` 的已登录头部操作区新增 `Account` 链接
+  - 为已验证用户新增 `Settings` 链接
+  - 为未验证用户新增弱化的 `Settings` 胶囊和“验证邮箱后可进入 Settings”提示
+  - 保留游客与未登录用户现有 `登录 / 注册` 入口，不把账号导航混进游客态
+  - 调整头部操作区布局，使其在小屏上也能换行展示
+- Files created/modified:
+  - `src/components/chat-app.tsx` (updated)
+  - `src/components/chat-app.test.tsx` (updated)
+  - `progress.md` (updated)
+
+### Phase 3: Verification
+- **Status:** complete with one pre-existing lint warning
+- Actions taken:
+  - 运行 `npm test -- src/components/chat-app.test.tsx`，30 个测试全部通过
+  - 运行 `npm test -- src/app/account/page.test.tsx src/app/settings/page.test.tsx`，6 个测试全部通过
+  - 运行 `npm run build`，包含 `/account` 与 `/settings` 入口后的构建通过
+  - 运行 `npm run lint`，仍有 `src/server/chat/chat-auth.test.ts` 的未使用导入 warning，与本轮导航改动无直接关联
+- Files created/modified:
+  - `progress.md` (updated)
+
+### Next Suggested Slice
+- 给 `/account` 增加真实账号信息模块，比如注册时间、验证状态说明和后续安全操作入口
+- 给 `/settings` 落第一组真实设置项，优先考虑邮箱验证相关动作或密码修改
+- 若后面受保护页面继续变多，再考虑抽离更统一的账号导航或轻量 `proxy.ts`

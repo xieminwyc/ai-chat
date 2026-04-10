@@ -128,6 +128,46 @@ describe("ChatApp", () => {
     expect(screen.getByRole("button", { name: "发送" })).toBeDisabled();
   });
 
+  it("shows account and settings links for verified users in the header action area", () => {
+    render(<ChatApp initialData={createInitialData()} />);
+
+    expect(screen.getByRole("link", { name: "Account" })).toHaveAttribute(
+      "href",
+      "/account",
+    );
+    expect(screen.getByRole("link", { name: "Settings" })).toHaveAttribute(
+      "href",
+      "/settings",
+    );
+  });
+
+  it("shows account access but keeps settings visually locked for unverified users", () => {
+    render(
+      <ChatApp
+        initialData={createInitialData({
+          currentUser: {
+            id: "user_1",
+            email: "alice@example.com",
+            emailVerifiedAt: null,
+            isEmailVerified: false,
+            createdAt: "2026-04-08T01:00:00.000Z",
+            updatedAt: "2026-04-08T01:00:00.000Z",
+          },
+        })}
+      />,
+    );
+
+    expect(screen.getByRole("link", { name: "Account" })).toHaveAttribute(
+      "href",
+      "/account",
+    );
+    expect(screen.queryByRole("link", { name: "Settings" })).not.toBeInTheDocument();
+    expect(screen.getByText("Settings")).toBeInTheDocument();
+    expect(
+      screen.getByText("验证邮箱后可进入 Settings"),
+    ).toBeInTheDocument();
+  });
+
   it("lets an authenticated unverified user resend the verification email", async () => {
     const user = userEvent.setup();
 
@@ -255,6 +295,8 @@ describe("ChatApp", () => {
     expect(screen.getByRole("button", { name: "发送" })).toBeEnabled();
     expect(screen.getByRole("button", { name: "登录" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "注册" })).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Account" })).not.toBeInTheDocument();
+    expect(screen.queryByText("Settings")).not.toBeInTheDocument();
   });
 
   it("keeps the guest workspace available before a cookie-backed guest session exists", () => {

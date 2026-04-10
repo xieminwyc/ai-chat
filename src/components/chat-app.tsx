@@ -1,6 +1,7 @@
 "use client";
 
 import dayjs from "dayjs";
+import Link from "next/link";
 import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
 
 import { createBrowserId } from "@/lib/browser-id";
@@ -155,6 +156,10 @@ export function ChatApp({ initialData }: { initialData: HomePageData }) {
       : `游客试用还剩 ${guestMessagesRemaining} 次`
     : null;
   const currentUserLabel = currentUser?.email ?? "已登录用户";
+  const headerActionLinkClass =
+    "inline-flex min-h-11 cursor-pointer items-center justify-center rounded-full border border-[rgba(24,48,59,0.12)] bg-white/90 px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-500/30";
+  const headerActionMutedClass =
+    "inline-flex min-h-11 items-center justify-center rounded-full border border-[rgba(24,48,59,0.08)] bg-[rgba(255,255,255,0.58)] px-4 py-2 text-sm font-medium text-slate-400";
   const savedSessionCount = String(chats.length).padStart(2, "0");
   const workspaceModeLabel = isAuthenticated
     ? isVerificationPending
@@ -1307,7 +1312,7 @@ export function ChatApp({ initialData }: { initialData: HomePageData }) {
                         : "未登录时先展示身份入口与工作台轮廓，登录后再进入真正可恢复的个人会话空间。"}
                 </p>
               </div>
-                <div className="hidden items-center gap-2 sm:flex">
+                <div className="flex flex-wrap items-center justify-end gap-2">
                 {activeChatUpdatedAt ? (
                   <span className="rounded-full border border-white/70 bg-white/84 px-3 py-1.5 text-xs text-slate-500 shadow-sm">
                     {activeChatUpdatedAt}
@@ -1318,8 +1323,28 @@ export function ChatApp({ initialData }: { initialData: HomePageData }) {
                     <span className="rounded-full border border-white/70 bg-white/84 px-3 py-1.5 text-xs text-slate-500 shadow-sm">
                       {currentUserLabel}
                     </span>
+                    <Link className={headerActionLinkClass} href="/account">
+                      Account
+                    </Link>
+                    {isVerificationPending ? (
+                      <div className="flex flex-col items-start gap-1 sm:items-end">
+                        <span
+                          aria-disabled="true"
+                          className={headerActionMutedClass}
+                        >
+                          Settings
+                        </span>
+                        <span className="px-1 text-xs text-amber-700">
+                          验证邮箱后可进入 Settings
+                        </span>
+                      </div>
+                    ) : (
+                      <Link className={headerActionLinkClass} href="/settings">
+                        Settings
+                      </Link>
+                    )}
                     <button
-                      className="inline-flex min-h-10 items-center justify-center rounded-full border border-[rgba(24,48,59,0.12)] bg-white/90 px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-500/30"
+                      className={headerActionLinkClass}
                       disabled={isAuthSubmitting}
                       onClick={() => void handleLogout()}
                       type="button"
