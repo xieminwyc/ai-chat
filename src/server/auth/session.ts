@@ -1,6 +1,26 @@
 const SESSION_TTL_DAYS = 7;
 const SESSION_COOKIE_NAME = "ai-chat-session";
 
+function shouldUseSecureCookies() {
+  if (process.env.COOKIE_SECURE === "true") {
+    return true;
+  }
+
+  if (process.env.COOKIE_SECURE === "false") {
+    return false;
+  }
+
+  if (process.env.APP_URL) {
+    try {
+      return new URL(process.env.APP_URL).protocol === "https:";
+    } catch {
+      // ignore invalid APP_URL and fall back to NODE_ENV below
+    }
+  }
+
+  return process.env.NODE_ENV === "production";
+}
+
 export function createSessionToken() {
   // token 必须是不可预测的随机值，这样浏览器拿到的只是“凭证”，不是用户信息。
   return crypto.randomUUID();
@@ -21,7 +41,7 @@ export function getSessionCookieOptions() {
   return {
     httpOnly: true,
     sameSite: "lax" as const,
-    secure: process.env.NODE_ENV === "production",
+    secure: shouldUseSecureCookies(),
     path: "/",
   };
 }

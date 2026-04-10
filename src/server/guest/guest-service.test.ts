@@ -21,6 +21,7 @@ import {
 } from "@/server/guest/guest-service";
 import {
   createGuestToken,
+  getGuestAuthShellCookieOptions,
   getGuestCookieName,
   getGuestCookieOptions,
   getGuestExpiresAt,
@@ -46,6 +47,30 @@ function createGuestSessionRecord(overrides?: {
 }
 
 describe("guest-session helpers", () => {
+  const originalCookieSecure = process.env.COOKIE_SECURE;
+  const originalAppUrl = process.env.APP_URL;
+  const originalNodeEnv = process.env.NODE_ENV;
+
+  afterEach(() => {
+    if (originalCookieSecure === undefined) {
+      delete process.env.COOKIE_SECURE;
+    } else {
+      process.env.COOKIE_SECURE = originalCookieSecure;
+    }
+
+    if (originalAppUrl === undefined) {
+      delete process.env.APP_URL;
+    } else {
+      process.env.APP_URL = originalAppUrl;
+    }
+
+    if (originalNodeEnv === undefined) {
+      delete process.env.NODE_ENV;
+    } else {
+      process.env.NODE_ENV = originalNodeEnv;
+    }
+  });
+
   it("creates a random guest token", () => {
     expect(createGuestToken()).toEqual(expect.any(String));
     expect(createGuestToken().length).toBeGreaterThan(0);
@@ -64,14 +89,38 @@ describe("guest-session helpers", () => {
     vi.useRealTimers();
   });
 
-  it("returns secure guest cookie options", () => {
+  it("returns non-secure guest cookie options when APP_URL is http", () => {
+    process.env.APP_URL = "http://xieminstudio.xyz:3000";
+    process.env.NODE_ENV = "production";
+    delete process.env.COOKIE_SECURE;
+
     expect(getGuestCookieOptions()).toEqual({
       httpOnly: true,
       sameSite: "lax",
-      secure: process.env.NODE_ENV === "production",
+      secure: false,
       path: "/",
       maxAge: 14 * 24 * 60 * 60,
     });
+    expect(getGuestAuthShellCookieOptions()).toEqual({
+      httpOnly: true,
+      sameSite: "lax",
+      secure: false,
+      path: "/",
+      maxAge: 14 * 24 * 60 * 60,
+    });
+  });
+
+  it("lets COOKIE_SECURE override APP_URL", () => {
+    process.env.APP_URL = "http://xieminstudio.xyz:3000";
+    process.env.COOKIE_SECURE = "true";
+
+    expect(getGuestCookieOptions().secure).toBe(true);
+    expect(getGuestAuthShellCookieOptions().secure).toBe(true);
+
+    process.env.COOKIE_SECURE = "false";
+
+    expect(getGuestCookieOptions().secure).toBe(false);
+    expect(getGuestAuthShellCookieOptions().secure).toBe(false);
   });
 
   it("reads guest token from cookie header", () => {

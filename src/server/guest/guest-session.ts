@@ -3,6 +3,26 @@ const GUEST_COOKIE_NAME = "ai-chat-guest";
 const GUEST_AUTH_SHELL_COOKIE_NAME = "ai-chat-auth-shell";
 const GUEST_COOKIE_MAX_AGE = GUEST_TTL_DAYS * 24 * 60 * 60;
 
+function shouldUseSecureCookies() {
+  if (process.env.COOKIE_SECURE === "true") {
+    return true;
+  }
+
+  if (process.env.COOKIE_SECURE === "false") {
+    return false;
+  }
+
+  if (process.env.APP_URL) {
+    try {
+      return new URL(process.env.APP_URL).protocol === "https:";
+    } catch {
+      // ignore invalid APP_URL and fall back to NODE_ENV below
+    }
+  }
+
+  return process.env.NODE_ENV === "production";
+}
+
 export function createGuestToken() {
   return crypto.randomUUID();
 }
@@ -25,7 +45,7 @@ export function getGuestCookieOptions() {
   return {
     httpOnly: true,
     sameSite: "lax" as const,
-    secure: process.env.NODE_ENV === "production",
+    secure: shouldUseSecureCookies(),
     path: "/",
     maxAge: GUEST_COOKIE_MAX_AGE,
   };
@@ -35,7 +55,7 @@ export function getGuestAuthShellCookieOptions() {
   return {
     httpOnly: true,
     sameSite: "lax" as const,
-    secure: process.env.NODE_ENV === "production",
+    secure: shouldUseSecureCookies(),
     path: "/",
     maxAge: GUEST_COOKIE_MAX_AGE,
   };
