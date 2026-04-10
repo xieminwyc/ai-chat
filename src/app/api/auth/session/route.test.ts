@@ -1,31 +1,45 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const authService = vi.hoisted(() => ({
-  getCurrentSession: vi.fn(),
+const entryState = vi.hoisted(() => ({
+  resolveEntryStateFromCookieHeader: vi.fn(),
 }));
 
 const guestService = vi.hoisted(() => ({
   GUEST_MESSAGE_LIMIT: 3,
-  getMergeableGuestSession: vi.fn(),
   getOrCreateGuestSession: vi.fn(),
 }));
 
 const guestSession = vi.hoisted(() => ({
-  readGuestAuthShellFromCookieHeader: vi.fn(),
   getGuestCookieName: vi.fn(),
   getGuestCookieOptions: vi.fn(),
   readGuestTokenFromCookieHeader: vi.fn(),
 }));
 
-vi.mock("@/server/auth/auth-service", () => authService);
+vi.mock("@/server/auth/entry-state", () => entryState);
 vi.mock("@/server/guest/guest-service", () => guestService);
 vi.mock("@/server/guest/guest-session", () => guestSession);
 
 import { GET } from "@/app/api/auth/session/route";
 
 describe("/api/auth/session route", () => {
+  const verifiedUser = {
+    id: "user_1",
+    email: "alice@example.com",
+    emailVerifiedAt: new Date("2026-04-08T03:00:00.000Z"),
+    createdAt: new Date("2026-04-08T01:00:00.000Z"),
+    updatedAt: new Date("2026-04-08T01:00:00.000Z"),
+  };
+
+  const unverifiedUser = {
+    ...verifiedUser,
+    emailVerifiedAt: null,
+  };
+
   beforeEach(() => {
     vi.clearAllMocks();
+    entryState.resolveEntryStateFromCookieHeader.mockResolvedValue({
+      kind: "signed_out_guest_preview",
+    });
     guestSession.getGuestCookieName.mockReturnValue("ai-chat-guest");
     guestSession.getGuestCookieOptions.mockReturnValue({
       httpOnly: true,
@@ -34,70 +48,26 @@ describe("/api/auth/session route", () => {
       path: "/",
       maxAge: 14 * 24 * 60 * 60,
     });
-    guestSession.readGuestAuthShellFromCookieHeader.mockReturnValue(false);
     guestSession.readGuestTokenFromCookieHeader.mockReturnValue(null);
-    guestService.getMergeableGuestSession.mockResolvedValue(null);
-  });
-
-  it("returns the authenticated user when a session is valid", async () => {
-    authService.getCurrentSession.mockResolvedValue({
-      id: "session_1",
-      token: "session-token",
-      userId: "user_1",
-      expiresAt: new Date("2026-04-15T01:00:00.000Z"),
-      createdAt: new Date("2026-04-08T01:00:00.000Z"),
-      user: {
-        id: "user_1",
-        email: "alice@example.com",
-        emailVerifiedAt: new Date("2026-04-08T03:00:00.000Z"),
-        createdAt: new Date("2026-04-08T01:00:00.000Z"),
-        updatedAt: new Date("2026-04-08T01:00:00.000Z"),
+    guestService.getOrCreateGuestSession.mockResolvedValue({
+      guestSession: {
+        id: "guest_1",
+        guestToken: "guest-token",
+        trialMessageCount: 0,
+        expiresAt: new Date("2026-04-24T01:00:00.000Z"),
       },
-    });
-
-    const response = await GET(
-      new Request("http://localhost:3000/api/auth/session", {
-        headers: {
-          cookie: "ai-chat-session=session-token",
-        },
-      }),
-    );
-
-    const data = await response.json();
-
-    expect(authService.getCurrentSession).toHaveBeenCalledWith("session-token");
-    expect(data).toMatchObject({
-      authenticated: true,
-      user: {
-        id: "user_1",
-        email: "alice@example.com",
-        isEmailVerified: true,
-      },
-      mergeCandidate: null,
-      guest: null,
+      created: true,
     });
   });
 
-  it("returns a merge candidate for a verified authenticated user with a guest cookie", async () => {
-    guestSession.readGuestTokenFromCookieHeader.mockReturnValue("guest-token");
-    authService.getCurrentSession.mockResolvedValue({
-      id: "session_1",
-      token: "session-token",
-      userId: "user_1",
-      expiresAt: new Date("2026-04-15T01:00:00.000Z"),
-      createdAt: new Date("2026-04-08T01:00:00.000Z"),
-      user: {
-        id: "user_1",
-        email: "alice@example.com",
-        emailVerifiedAt: new Date("2026-04-08T03:00:00.000Z"),
-        createdAt: new Date("2026-04-08T01:00:00.000Z"),
-        updatedAt: new Date("2026-04-08T01:00:00.000Z"),
+  it("returns authenticated verified payload with user and optional mergeCandidate", async () => {
+    entryState.resolveEntryStateFromCookieHeader.mockResolvedValue({
+      kind: "authenticated_verified",
+      user: verifiedUser,
+      mergeCandidate: {
+        guestSessionId: "guest_1",
+        trialMessageCount: 2,
       },
-    });
-    guestService.getMergeableGuestSession.mockResolvedValue({
-      id: "guest_1",
-      guestToken: "guest-token",
-      trialMessageCount: 2,
     });
 
     const response = await GET(
@@ -107,32 +77,119 @@ describe("/api/auth/session route", () => {
         },
       }),
     );
+
     const data = await response.json();
 
-    expect(guestService.getMergeableGuestSession).toHaveBeenCalledWith(
-      "guest-token",
+    expect(entryState.resolveEntryStateFromCookieHeader).toHaveBeenCalledWith(
+      "ai-chat-session=session-token; ai-chat-guest=guest-token",
     );
-    expect(data.mergeCandidate).toEqual({
-      guestSessionId: "guest_1",
-      trialMessageCount: 2,
+    expect(guestService.getOrCreateGuestSession).not.toHaveBeenCalled();
+    expect(data).toMatchObject({
+      authenticated: true,
+      user: {
+        isEmailVerified: true,
+      },
+      mergeCandidate: {
+        guestSessionId: "guest_1",
+        trialMessageCount: 2,
+      },
+      guest: null,
+    });
+    expect(data.user).toMatchObject({
+      id: verifiedUser.id,
+      email: verifiedUser.email,
     });
   });
 
-  it("returns guest state and writes the guest cookie when the session is missing", async () => {
-    authService.getCurrentSession.mockResolvedValue(null);
+  it("returns authenticated unverified payload with user and no mergeCandidate", async () => {
+    entryState.resolveEntryStateFromCookieHeader.mockResolvedValue({
+      kind: "authenticated_unverified",
+      user: unverifiedUser,
+      mergeCandidate: null,
+    });
+
+    const response = await GET(new Request("http://localhost:3000/api/auth/session"));
+    const data = await response.json();
+
+    expect(guestService.getOrCreateGuestSession).not.toHaveBeenCalled();
+    expect(data).toMatchObject({
+      authenticated: true,
+      user: {
+        id: unverifiedUser.id,
+        email: unverifiedUser.email,
+        isEmailVerified: false,
+      },
+      mergeCandidate: null,
+      guest: null,
+    });
+  });
+
+  it("returns signed-out auth shell payload and does not create a guest session", async () => {
+    entryState.resolveEntryStateFromCookieHeader.mockResolvedValue({
+      kind: "signed_out_auth_shell",
+    });
+
+    const response = await GET(
+      new Request("http://localhost:3000/api/auth/session", {
+        headers: {
+          cookie: "ai-chat-auth-shell=1; ai-chat-guest=guest-token",
+        },
+      }),
+    );
+    const data = await response.json();
+
+    expect(data).toEqual({
+      authenticated: false,
+      user: null,
+      guest: null,
+    });
+    expect(entryState.resolveEntryStateFromCookieHeader).toHaveBeenCalledWith(
+      "ai-chat-auth-shell=1; ai-chat-guest=guest-token",
+    );
+    expect(guestService.getOrCreateGuestSession).not.toHaveBeenCalled();
+  });
+
+  it("returns signed-out guest workspace payload without creating a new guest session", async () => {
+    entryState.resolveEntryStateFromCookieHeader.mockResolvedValue({
+      kind: "signed_out_guest_workspace",
+      guestSession: {
+        id: "guest_1",
+        trialMessageCount: 2,
+      },
+    });
+
+    const response = await GET(new Request("http://localhost:3000/api/auth/session"));
+    const data = await response.json();
+
+    expect(guestService.getOrCreateGuestSession).not.toHaveBeenCalled();
+    expect(data).toEqual({
+      authenticated: false,
+      user: null,
+      guest: {
+        active: true,
+        trialMessageCount: 2,
+        messageLimit: 3,
+      },
+    });
+    expect(response.headers.get("set-cookie")).toBeNull();
+  });
+
+  it("returns signed-out guest preview payload, creates a guest session, and writes the guest cookie", async () => {
+    entryState.resolveEntryStateFromCookieHeader.mockResolvedValue({
+      kind: "signed_out_guest_preview",
+    });
+    guestSession.readGuestTokenFromCookieHeader.mockReturnValue(null);
     guestService.getOrCreateGuestSession.mockResolvedValue({
       guestSession: {
         id: "guest_1",
         guestToken: "guest-token",
         trialMessageCount: 1,
+        expiresAt: new Date("2026-04-24T01:00:00.000Z"),
       },
       created: true,
     });
 
-    const response = await GET(
-      new Request("http://localhost:3000/api/auth/session"),
-    );
-
+    const response = await GET(new Request("http://localhost:3000/api/auth/session"));
     const data = await response.json();
 
     expect(data).toEqual({
@@ -144,28 +201,46 @@ describe("/api/auth/session route", () => {
         messageLimit: 3,
       },
     });
+    expect(guestService.getOrCreateGuestSession).toHaveBeenCalledWith(null);
     expect(response.headers.get("set-cookie")).toContain("ai-chat-guest=guest-token");
   });
 
-  it("returns signed-out auth state without creating a new guest when auth-shell cookie is present", async () => {
-    authService.getCurrentSession.mockResolvedValue(null);
-    guestSession.readGuestAuthShellFromCookieHeader.mockReturnValue(true);
+  it("forwards stale guest token for preview activation and replaces the guest cookie", async () => {
+    entryState.resolveEntryStateFromCookieHeader.mockResolvedValue({
+      kind: "signed_out_guest_preview",
+    });
+    guestSession.readGuestTokenFromCookieHeader.mockReturnValue("stale-token");
+    guestService.getOrCreateGuestSession.mockResolvedValue({
+      guestSession: {
+        id: "guest_2",
+        guestToken: "fresh-token",
+        trialMessageCount: 0,
+        expiresAt: new Date("2026-04-25T01:00:00.000Z"),
+      },
+      created: true,
+    });
 
     const response = await GET(
       new Request("http://localhost:3000/api/auth/session", {
         headers: {
-          cookie: "ai-chat-auth-shell=1",
+          cookie: "ai-chat-guest=stale-token",
         },
       }),
     );
 
-    const data = await response.json();
+    expect(guestService.getOrCreateGuestSession).toHaveBeenCalledWith("stale-token");
+    expect(response.headers.get("set-cookie")).toContain("ai-chat-guest=fresh-token");
+  });
+
+  it("throws for an unknown entry state instead of implicitly creating a guest session", async () => {
+    entryState.resolveEntryStateFromCookieHeader.mockResolvedValue({
+      kind: "future_state",
+    } as never);
+
+    await expect(
+      GET(new Request("http://localhost:3000/api/auth/session")),
+    ).rejects.toThrow("Unhandled entry state");
 
     expect(guestService.getOrCreateGuestSession).not.toHaveBeenCalled();
-    expect(data).toEqual({
-      authenticated: false,
-      user: null,
-      guest: null,
-    });
   });
 });

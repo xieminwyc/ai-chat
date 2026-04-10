@@ -147,3 +147,54 @@
   - `task_plan.md` (updated)
   - `findings.md` (updated)
   - `progress.md` (updated)
+
+## Session: 2026-04-10
+
+### Phase 1: Entry State Design & Plan
+- **Status:** complete
+- **Started:** 2026-04-10
+- Actions taken:
+  - 新增统一入口状态设计文档，明确首页与 `/api/auth/session` 共享 5 种显式入口状态
+  - 新增实现计划文档，拆分为 `entry-state` 模块、首页重构、session route 重构和最终验证四个任务
+  - 确认本轮范围不包含 `proxy.ts`、聊天 action 鉴权重写或新增 protected pages
+- Files created/modified:
+  - `docs/superpowers/specs/2026-04-10-entry-state-and-page-protection-design.md` (created)
+  - `docs/superpowers/specs/2026-04-10-entry-state-and-page-protection-learning.md` (created)
+  - `docs/superpowers/plans/2026-04-10-entry-state-and-page-protection-implementation.md` (created)
+
+### Phase 2: Shared Entry-State Refactor
+- **Status:** complete
+- Actions taken:
+  - 扩展 `src/server/auth/entry-state.ts`，补充可复用的 cookie store 类型和共享 identity input 解析入口
+  - 为 `entry-state` 增加聚焦测试，覆盖 5 种入口状态及 `authenticated` / `verified` 页面访问 helper
+  - 将首页数据 bootstrap 改为消费共享 `entry-state`，保留 guest preview 只读语义
+  - 将 `/api/auth/session` 改为先消费共享 `entry-state`，仅在 `signed_out_guest_preview` 下触发 guest session 激活
+  - 抽出 `src/lib/prisma-config.ts` 并为 `prisma.config.ts` 补上可测试的 `DATABASE_URL` 读取逻辑
+- Files created/modified:
+  - `src/server/auth/entry-state.ts` (updated)
+  - `src/server/auth/entry-state.test.ts` (updated)
+  - `src/server/page/home-data.ts` (updated)
+  - `src/server/page/home-data.test.ts` (updated)
+  - `src/app/api/auth/session/route.ts` (updated)
+  - `src/app/api/auth/session/route.test.ts` (updated)
+  - `src/lib/prisma-config.ts` (created)
+  - `src/lib/prisma-config.test.ts` (created)
+  - `prisma.config.ts` (updated)
+
+### Phase 3: Verification
+- **Status:** complete with one pre-existing lint warning
+- Actions taken:
+  - 运行 `npm test -- src/server/auth/entry-state.test.ts`，11 个测试全部通过
+  - 运行 `npm test -- src/server/page/home-data.test.ts`，5 个测试全部通过
+  - 运行 `npm test -- src/app/api/auth/session/route.test.ts`，7 个测试全部通过
+  - 运行 `npm test -- src/components/chat-app.test.tsx`，28 个测试全部通过
+  - 运行 `npm test -- src/app/api/chat/route.test.ts`，11 个测试全部通过
+  - 运行 `npm run build`，Next.js 16 生产构建通过
+  - 运行 `npm run lint`，发现 `src/server/chat/chat-auth.test.ts` 存在一个未使用导入 warning，与本次切片无直接关联
+- Files created/modified:
+  - `progress.md` (updated)
+
+### Next Suggested Slice
+- 先把 `resolveProtectedPageAccess()` 真正接到第一个受保护页面，例如 `/account` 或 `/settings`
+- 再决定是否需要引入轻量 `proxy.ts`，只做 redirect，不接管完整鉴权
+- 若要继续收口工程配置，可顺手清掉 `src/server/chat/chat-auth.test.ts` 里的未使用导入 warning

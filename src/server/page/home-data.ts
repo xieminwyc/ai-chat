@@ -1,19 +1,10 @@
 import { cookies } from "next/headers";
 
-import { getCurrentSession } from "@/server/auth/auth-service";
-import { getSessionCookieName } from "@/server/auth/session";
+import { resolveEntryStateFromCookieStore } from "@/server/auth/entry-state";
 import { chatQuerySchema } from "@/server/chat/chat-schemas";
 import type { ChatOwner } from "@/server/chat/chat-types";
 import { listChatSummaries, loadChatMessages } from "@/server/chat/chat-service";
-import {
-  getCurrentGuestSession,
-  GUEST_MESSAGE_LIMIT,
-  getMergeableGuestSession,
-} from "@/server/guest/guest-service";
-import {
-  getGuestAuthShellCookieName,
-  getGuestCookieName,
-} from "@/server/guest/guest-session";
+import { GUEST_MESSAGE_LIMIT } from "@/server/guest/guest-service";
 
 export type HomePageUser = {
   id: string;
@@ -185,60 +176,54 @@ export async function getHomePageData({
   selectedChatId,
 }: GetHomePageDataInput): Promise<HomePageData> {
   const cookieStore = await cookies();
-  const sessionToken =
-    cookieStore.get(getSessionCookieName())?.value ?? null;
-  const session = await getCurrentSession(sessionToken);
+  const entryState = await resolveEntryStateFromCookieStore(cookieStore);
 
-  if (session) {
-    const owner: ChatOwner = { kind: "user", userId: session.user.id };
+  if (entryState.kind === "signed_out_guest_preview") {
+    return createGuestHomePageData(null);
+  }
+
+  if (entryState.kind === "signed_out_auth_shell") {
+    return createSignedOutHomePageData();
+  }
+
+  if (entryState.kind === "signed_out_guest_workspace") {
+    const owner: ChatOwner = {
+      kind: "guest",
+      guestSessionId: entryState.guestSession.id,
+    };
     const initialState = await loadInitialChatState(owner, selectedChatId);
-    const guestToken = cookieStore.get(getGuestCookieName())?.value ?? null;
-    const mergeableGuestSession = session.user.emailVerifiedAt
-      ? await getMergeableGuestSession(guestToken)
-      : null;
+
+    return createGuestHomePageData(
+      entryState.guestSession,
+      initialState.initialChats,
+      initialState.initialMessages,
+      initialState.initialChatId,
+    );
+  }
+
+  if (entryState.kind === "authenticated_unverified") {
+    const owner: ChatOwner = { kind: "user", userId: entryState.user.id };
+    const initialState = await loadInitialChatState(owner, selectedChatId);
 
     return {
       viewerKind: "user",
       isAuthenticated: true,
-      currentUser: serializeUser(session.user),
-      mergeCandidate: mergeableGuestSession
-        ? {
-            guestSessionId: mergeableGuestSession.id,
-            trialMessageCount: mergeableGuestSession.trialMessageCount,
-          }
-        : null,
+      currentUser: serializeUser(entryState.user),
+      mergeCandidate: null,
       guestSession: null,
       ...initialState,
     };
   }
 
-  const shouldPreferAuthShell =
-    cookieStore.get(getGuestAuthShellCookieName())?.value === "1";
-  if (shouldPreferAuthShell) {
-    return createSignedOutHomePageData();
-  }
-
-  const guestToken = cookieStore.get(getGuestCookieName())?.value ?? null;
-  if (!guestToken) {
-    return createGuestHomePageData(null);
-  }
-
-  const guestSession = await getCurrentGuestSession(guestToken);
-
-  if (!guestSession) {
-    return createGuestHomePageData(null);
-  }
-
-  const owner: ChatOwner = {
-    kind: "guest",
-    guestSessionId: guestSession.id,
-  };
+  const owner: ChatOwner = { kind: "user", userId: entryState.user.id };
   const initialState = await loadInitialChatState(owner, selectedChatId);
 
-  return createGuestHomePageData(
-    guestSession,
-    initialState.initialChats,
-    initialState.initialMessages,
-    initialState.initialChatId,
-  );
+  return {
+    viewerKind: "user",
+    isAuthenticated: true,
+    currentUser: serializeUser(entryState.user),
+    mergeCandidate: entryState.mergeCandidate,
+    guestSession: null,
+    ...initialState,
+  };
 }

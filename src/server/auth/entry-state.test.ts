@@ -14,6 +14,7 @@ vi.mock("@/server/guest/guest-service", () => guestService);
 
 import type { EntryState } from "@/server/auth/entry-state";
 import {
+  resolveEntryStateFromIdentityInput,
   resolveEntryStateFromCookieHeader,
   resolveEntryStateFromCookieStore,
   resolveProtectedPageAccess,
@@ -21,11 +22,13 @@ import {
 
 function createCookieStore(
   values: Record<string, string | undefined>,
-): { get: (name: string) => { name: string; value: string } | undefined } {
+): {
+  get: (name: string) => { value: string } | undefined;
+} {
   return {
     get(name: string) {
       const value = values[name];
-      return value === undefined ? undefined : { name, value };
+      return value === undefined ? undefined : { value };
     },
   };
 }
@@ -103,10 +106,95 @@ describe("entry-state", () => {
     const state = await resolveEntryStateFromCookieStore(
       createCookieStore({
         "ai-chat-auth-shell": "1",
-      }) as never,
+      }),
     );
 
     expect(state.kind).toBe("signed_out_auth_shell");
+  });
+
+  it("resolves authenticated_verified from cookie store when session and guest cookies are present", async () => {
+    authService.getCurrentSession.mockResolvedValue({
+      id: "session_1",
+      token: "session-token",
+      userId: "user_1",
+      expiresAt: new Date("2026-04-15T01:00:00.000Z"),
+      createdAt: new Date("2026-04-08T01:00:00.000Z"),
+      user: {
+        id: "user_1",
+        email: "alice@example.com",
+        emailVerifiedAt: new Date("2026-04-08T03:00:00.000Z"),
+        createdAt: new Date("2026-04-08T01:00:00.000Z"),
+        updatedAt: new Date("2026-04-08T01:00:00.000Z"),
+      },
+    });
+    guestService.getMergeableGuestSession.mockResolvedValue({
+      id: "guest_1",
+      guestToken: "guest-token",
+      trialMessageCount: 2,
+      mergedAt: null,
+      expiresAt: new Date("2026-04-22T01:00:00.000Z"),
+      createdAt: new Date("2026-04-08T01:00:00.000Z"),
+      updatedAt: new Date("2026-04-08T01:00:00.000Z"),
+    });
+
+    const state = await resolveEntryStateFromCookieStore(
+      createCookieStore({
+        "ai-chat-session": "session-token",
+        "ai-chat-guest": "guest-token",
+      }),
+    );
+
+    expect(state.kind).toBe("authenticated_verified");
+    expect(state.mergeCandidate).toEqual({
+      guestSessionId: "guest_1",
+      trialMessageCount: 2,
+    });
+  });
+
+  it("resolves signed_out_guest_workspace from cookie store when a guest cookie maps to a current guest session", async () => {
+    guestService.getCurrentGuestSession.mockResolvedValue({
+      id: "guest_1",
+      guestToken: "guest-token",
+      trialMessageCount: 1,
+      mergedAt: null,
+      expiresAt: new Date("2026-04-22T01:00:00.000Z"),
+      createdAt: new Date("2026-04-08T01:00:00.000Z"),
+      updatedAt: new Date("2026-04-08T01:00:00.000Z"),
+    });
+
+    const state = await resolveEntryStateFromCookieStore(
+      createCookieStore({
+        "ai-chat-guest": "guest-token",
+      }),
+    );
+
+    expect(state.kind).toBe("signed_out_guest_workspace");
+    expect(state.guestSession).toEqual({
+      id: "guest_1",
+      trialMessageCount: 1,
+    });
+  });
+
+  it("auth-shell wins over guest workspace for signed-out cookie store requests when both cookies are present", async () => {
+    guestService.getCurrentGuestSession.mockResolvedValue({
+      id: "guest_1",
+      guestToken: "guest-token",
+      trialMessageCount: 1,
+      mergedAt: null,
+      expiresAt: new Date("2026-04-22T01:00:00.000Z"),
+      createdAt: new Date("2026-04-08T01:00:00.000Z"),
+      updatedAt: new Date("2026-04-08T01:00:00.000Z"),
+    });
+
+    const state = await resolveEntryStateFromCookieStore(
+      createCookieStore({
+        "ai-chat-auth-shell": "1",
+        "ai-chat-guest": "guest-token",
+      }),
+    );
+
+    expect(state.kind).toBe("signed_out_auth_shell");
+    expect(guestService.getCurrentGuestSession).not.toHaveBeenCalled();
   });
 
   it("resolves signed_out_guest_workspace when a current guest session exists", async () => {
@@ -139,6 +227,46 @@ describe("entry-state", () => {
     );
 
     expect(state.kind).toBe("signed_out_guest_preview");
+  });
+
+  it("accepts an already-resolved authenticated session without refetching by sessionToken", async () => {
+    const resolvedSession = {
+      id: "session_1",
+      token: "session-token",
+      userId: "user_1",
+      expiresAt: new Date("2026-04-15T01:00:00.000Z"),
+      createdAt: new Date("2026-04-08T01:00:00.000Z"),
+      user: {
+        id: "user_1",
+        email: "alice@example.com",
+        emailVerifiedAt: new Date("2026-04-08T03:00:00.000Z"),
+        createdAt: new Date("2026-04-08T01:00:00.000Z"),
+        updatedAt: new Date("2026-04-08T01:00:00.000Z"),
+      },
+    };
+    guestService.getMergeableGuestSession.mockResolvedValue({
+      id: "guest_1",
+      guestToken: "guest-token",
+      trialMessageCount: 2,
+      mergedAt: null,
+      expiresAt: new Date("2026-04-22T01:00:00.000Z"),
+      createdAt: new Date("2026-04-08T01:00:00.000Z"),
+      updatedAt: new Date("2026-04-08T01:00:00.000Z"),
+    });
+
+    const state = await resolveEntryStateFromIdentityInput({
+      session: resolvedSession,
+      sessionToken: "session-token",
+      guestToken: "guest-token",
+      shouldPreferAuthShell: false,
+    });
+
+    expect(authService.getCurrentSession).not.toHaveBeenCalled();
+    expect(state.kind).toBe("authenticated_verified");
+    expect(state.mergeCandidate).toEqual({
+      guestSessionId: "guest_1",
+      trialMessageCount: 2,
+    });
   });
 
   it("access helper allows authenticated pages only for authenticated states", () => {

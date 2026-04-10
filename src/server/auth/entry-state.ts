@@ -58,18 +58,29 @@ export type EntryState = Readonly<
     }
 >;
 
-type EntryIdentityInput = {
+export type EntryStateCookieStore = Readonly<{
+  get(name: string): { value: string } | undefined;
+}>;
+
+type ResolvedSession = NonNullable<Awaited<ReturnType<typeof getCurrentSession>>>;
+
+export type EntryIdentityInput = {
+  session?: ResolvedSession | null;
   sessionToken?: string | null;
   guestToken?: string | null;
   shouldPreferAuthShell?: boolean;
 };
 
-async function resolveEntryStateFromIdentity({
+export async function resolveEntryStateFromIdentityInput({
+  session: providedSession,
   sessionToken,
   guestToken,
   shouldPreferAuthShell = false,
 }: EntryIdentityInput): Promise<EntryState> {
-  const session = await getCurrentSession(sessionToken);
+  const session =
+    providedSession === undefined
+      ? await getCurrentSession(sessionToken)
+      : providedSession;
 
   if (session) {
     if (!session.user.emailVerifiedAt) {
@@ -114,7 +125,7 @@ async function resolveEntryStateFromIdentity({
 export async function resolveEntryStateFromCookieHeader(
   cookieHeader?: string | null,
 ): Promise<EntryState> {
-  return resolveEntryStateFromIdentity({
+  return resolveEntryStateFromIdentityInput({
     sessionToken: readSessionTokenFromCookieHeader(cookieHeader),
     guestToken: readGuestTokenFromCookieHeader(cookieHeader),
     shouldPreferAuthShell: readGuestAuthShellFromCookieHeader(cookieHeader),
@@ -122,9 +133,9 @@ export async function resolveEntryStateFromCookieHeader(
 }
 
 export async function resolveEntryStateFromCookieStore(
-  cookieStore: Awaited<ReturnType<typeof import("next/headers").cookies>>,
+  cookieStore: EntryStateCookieStore,
 ): Promise<EntryState> {
-  return resolveEntryStateFromIdentity({
+  return resolveEntryStateFromIdentityInput({
     sessionToken: cookieStore.get(getSessionCookieName())?.value ?? null,
     guestToken: cookieStore.get(getGuestCookieName())?.value ?? null,
     shouldPreferAuthShell:
