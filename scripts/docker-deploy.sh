@@ -20,7 +20,8 @@ log "working directory: $PROJECT_DIR"
 
 # ── 2. 更新代码（compose.yml / scripts 等配置文件跟着更新）──
 log "pulling latest code..."
-git pull origin main
+git fetch origin main
+git reset --hard origin/main
 
 # ── 3. 登录阿里云 ACR ──────────────────────────────────────────
 # ACR_PASSWORD 需要提前在服务器 ~/.bashrc 或 /etc/environment 里配置：
@@ -37,10 +38,10 @@ fi
 log "pulling latest image..."
 docker compose -f "$COMPOSE_FILE" pull
 
-# ── 5. 执行数据库迁移（可选，仅在 schema 变更时需要）──────────
-# 如需手动执行迁移，在服务器上运行：
-#   docker compose -f /root/apps/ai-chat/compose.yml run --rm --entrypoint "" \
-#     ai-chat sh -c "npx --yes prisma migrate deploy --schema=prisma/schema.prisma"
+# ── 5. 执行数据库迁移 ───────────────────────────────────────
+log "running prisma migrations..."
+docker compose -f "$COMPOSE_FILE" run --rm --entrypoint "" \
+  ai-chat sh -c "node node_modules/prisma/build/index.js migrate deploy --schema=prisma/schema.prisma"
 
 # ── 6. 重启应用容器（使用新拉取的镜像）─────────────────────
 log "starting containers..."

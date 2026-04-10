@@ -55,6 +55,7 @@ ENV NEXT_TELEMETRY_DISABLED=1
 # 创建一个没有特权的普通系统用户来运行应用（安全最佳实践，不用 root）
 RUN addgroup --system --gid 1001 nodejs
 RUN adduser --system --uid 1001 nextjs
+RUN mkdir -p ./scripts
 
 # 从阶段二只复制运行需要的产物：1
 # 静态文件（图片、favicon 等）
@@ -67,8 +68,11 @@ COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
 # standalone 的 file tracing 有时漏掉 Prisma 生成的客户端，手动补上
 COPY --from=builder --chown=nextjs:nodejs /app/node_modules/.prisma ./node_modules/.prisma
 COPY --from=builder --chown=nextjs:nodejs /app/node_modules/@prisma ./node_modules/@prisma
+COPY --from=builder --chown=nextjs:nodejs /app/node_modules/prisma ./node_modules/prisma
 # prisma schema + migration 文件（docker-deploy.sh 用临时容器跑 migrate 时需要）
 COPY --from=builder --chown=nextjs:nodejs /app/prisma ./prisma
+COPY --from=builder --chown=nextjs:nodejs /app/prisma.config.ts ./prisma.config.ts
+COPY --from=builder --chown=nextjs:nodejs /app/scripts/env.mjs ./scripts/env.mjs
 
 # 切换到普通用户（之后的命令和容器启动都以这个用户身份运行）
 USER nextjs
