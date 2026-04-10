@@ -21,14 +21,10 @@ assert_contains "${DEPLOY_SCRIPT_PATH}" 'git reset --hard origin/main'
 assert_contains "${DEPLOY_SCRIPT_PATH}" 'set -a'
 assert_contains "${DEPLOY_SCRIPT_PATH}" '. "$ENV_FILE"'
 assert_contains "${DEPLOY_SCRIPT_PATH}" 'require_env_var "APP_URL"'
+assert_contains "${DEPLOY_SCRIPT_PATH}" 'APP_ENV=production node scripts/env.mjs npx prisma migrate deploy'
 assert_contains "${DEPLOY_SCRIPT_PATH}" 'require_env_var "RESEND_API_KEY"'
 assert_contains "${DEPLOY_SCRIPT_PATH}" 'require_env_var "RESEND_FROM_EMAIL"'
 
-assert_contains "${DEPLOY_WORKFLOW_PATH}" 'Set up Node.js'
-assert_contains "${DEPLOY_WORKFLOW_PATH}" 'Install dependencies'
-assert_contains "${DEPLOY_WORKFLOW_PATH}" 'Run Prisma migrations'
 assert_contains "${DEPLOY_WORKFLOW_PATH}" 'ref: ${{ github.event.workflow_run.head_sha }}'
-assert_contains "${DEPLOY_WORKFLOW_PATH}" 'DATABASE_URL: ${{ secrets.PRODUCTION_DATABASE_URL }}'
-assert_contains "${DEPLOY_WORKFLOW_PATH}" 'APP_ENV=production node scripts/env.mjs npx prisma migrate deploy'
 
 echo "docker deploy runtime regression checks passed"

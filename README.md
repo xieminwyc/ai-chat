@@ -86,7 +86,8 @@ SILICONFLOW_MODEL=
 
 Docker Compose 线上部署时：
 
-- GitHub Actions 使用 `PRODUCTION_DATABASE_URL` secret 执行 migration
+- GitHub Actions 只负责通过 SSH 触发服务器部署脚本
+- 服务器上的 `scripts/docker-deploy.sh` 使用本地 `.env.production` 执行 migration
 - 服务器本地 `/root/apps/ai-chat/.env.production` 提供运行时真实值
 
 ## Scripts
@@ -204,15 +205,14 @@ CI 只使用安全占位值，不使用真实生产密钥。
 
 部署方式：
 
-- GitHub Actions 先对生产数据库执行 `prisma migrate deploy`
 - GitHub Actions 通过 SSH 登录阿里云服务器
 - 执行服务器上的 `scripts/docker-deploy.sh`
+- 服务器脚本加载 `/root/apps/ai-chat/.env.production`，执行 `prisma migrate deploy` 后再拉镜像重启服务
 
 ### Required GitHub Secrets
 
 需要在 GitHub 仓库中配置：
 
-- `PRODUCTION_DATABASE_URL`
 - `SERVER_HOST`
 - `SERVER_PORT`
 - `SERVER_USER`

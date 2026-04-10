@@ -52,6 +52,10 @@ require_env_var "SILICONFLOW_API_KEY"
 require_env_var "SILICONFLOW_BASE_URL"
 require_env_var "SILICONFLOW_MODEL"
 
+# ── 4.1 在服务器上执行 Prisma migration ──────────────────────
+log "running prisma migrations on server..."
+APP_ENV=production node scripts/env.mjs npx prisma migrate deploy
+
 # ── 4. 登录阿里云 ACR ──────────────────────────────────────────
 # ACR_PASSWORD 需要提前在服务器 ~/.bashrc 或 /etc/environment 里配置：
 #   export ACR_PASSWORD=<阿里云容器镜像服务密码>
