@@ -70,4 +70,28 @@ describe("ResetPasswordForm", () => {
       await screen.findByText("Password reset link has expired"),
     ).toBeInTheDocument();
   });
+
+  it("shows a readable message when reset fails with a structured error", async () => {
+    const user = userEvent.setup();
+
+    vi.spyOn(global, "fetch").mockResolvedValue({
+      ok: false,
+      json: async () => ({
+        error: {
+          code: "auth.password_reset_token_expired",
+          message: "Password reset link has expired",
+        },
+      }),
+    } as Response);
+
+    render(<ResetPasswordForm token="expired-token" />);
+
+    await user.type(screen.getByLabelText("新密码"), "brand-new-password");
+    await user.type(screen.getByLabelText("确认新密码"), "brand-new-password");
+    await user.click(screen.getByRole("button", { name: "更新密码" }));
+
+    expect(
+      await screen.findByText("Password reset link has expired"),
+    ).toBeInTheDocument();
+  });
 });

@@ -4,6 +4,11 @@ import dayjs from "dayjs";
 import Link from "next/link";
 import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
 
+import {
+  getApiError,
+  getApiErrorMessage,
+  type ApiErrorPayload,
+} from "@/lib/api-error";
 import { createBrowserId } from "@/lib/browser-id";
 import type { HomePageData } from "@/server/page/home-data";
 
@@ -65,35 +70,54 @@ function formatChatUpdatedAt(updatedAt?: string) {
   return dayjs(updatedAt).format("YYYY-MM-DD HH:mm");
 }
 
-function getAuthFeedbackMessage(mode: AuthMode, backendError?: string) {
-  if (!backendError) {
+function getAuthFeedbackMessage(
+  mode: AuthMode,
+  backendError?: {
+    code?: string;
+    message?: string;
+  } | null,
+) {
+  const backendErrorCode = backendError?.code;
+  const backendErrorMessage = backendError?.message;
+
+  if (!backendErrorCode && !backendErrorMessage) {
     return mode === "login"
       ? "登录失败，请稍后再试。"
       : "注册失败，请稍后再试。";
   }
 
-  if (backendError === "Invalid email or password") {
+  if (
+    backendErrorCode === "auth.invalid_credentials" ||
+    backendErrorMessage === "Invalid email or password"
+  ) {
     return "邮箱或密码不正确。如果你还没注册，可以先切到“注册”创建账号。";
   }
 
-  if (backendError === "Invalid login payload") {
+  if (
+    backendErrorCode === "auth.invalid_payload" &&
+    mode === "login"
+  ) {
     return "请输入有效的邮箱和密码后再试。";
   }
 
-  if (backendError === "A user with this email already exists") {
+  if (
+    backendErrorCode === "auth.email_already_exists" ||
+    backendErrorMessage === "A user with this email already exists"
+  ) {
     return "这个邮箱已经注册过了，可以直接切到“登录”。";
   }
 
-  if (backendError === "Invalid registration payload") {
+  if (
+    backendErrorCode === "auth.invalid_payload" &&
+    mode === "register"
+  ) {
     return "注册信息格式不对，请检查邮箱和密码长度。";
   }
 
-  return backendError;
+  return backendErrorMessage ?? (mode === "login"
+    ? "登录失败，请稍后再试。"
+    : "注册失败，请稍后再试。");
 }
-
-type ErrorPayload = {
-  error?: string;
-};
 
 type SignedOutStateOptions = {
   preserveMessages?: boolean;
@@ -280,18 +304,17 @@ export function ChatApp({ initialData }: { initialData: HomePageData }) {
     void (async () => {
       try {
         const response = await fetch(`/api/chat?chatId=${savedChatId}`);
-        const data = (await response.json()) as {
-          error?: string;
+        const data = (await response.json()) as ApiErrorPayload & {
           messages?: ChatMessage[];
         };
 
         if (response.status === 401) {
-          moveToSignedOutState(data.error || sessionExpiredMessage);
+          moveToSignedOutState(getApiErrorMessage(data, sessionExpiredMessage));
           return;
         }
 
         if (!response.ok) {
-          throw new Error(data.error || "读取历史消息失败");
+          throw new Error(getApiErrorMessage(data, "读取历史消息失败"));
         }
 
         setMessages(data.messages ?? []);
@@ -309,21 +332,20 @@ export function ChatApp({ initialData }: { initialData: HomePageData }) {
   async function loadChatHistory(activeChatId: string) {
     try {
       const response = await fetch(`/api/chat?chatId=${activeChatId}`);
-      const data = (await response.json()) as {
+      const data = (await response.json()) as ApiErrorPayload & {
         chatId?: string;
-        error?: string;
         messages?: ChatMessage[];
       };
 
       if (response.status === 401) {
-        moveToSignedOutState(data.error || sessionExpiredMessage, {
+        moveToSignedOutState(getApiErrorMessage(data, sessionExpiredMessage), {
           preserveMessages: true,
         });
         return;
       }
 
       if (!response.ok) {
-        throw new Error(data.error || "读取历史消息失败");
+        throw new Error(getApiErrorMessage(data, "读取历史消息失败"));
       }
 
       setMessages(data.messages ?? []);
@@ -346,20 +368,19 @@ export function ChatApp({ initialData }: { initialData: HomePageData }) {
 
     try {
       const response = await fetch("/api/chat");
-      const data = (await response.json()) as {
+      const data = (await response.json()) as ApiErrorPayload & {
         chats?: ChatSummary[];
-        error?: string;
       };
 
       if (response.status === 401) {
-        moveToSignedOutState(data.error || sessionExpiredMessage, {
+        moveToSignedOutState(getApiErrorMessage(data, sessionExpiredMessage), {
           preserveMessages: true,
         });
         return;
       }
 
       if (!response.ok) {
-        throw new Error(data.error || "读取会话列表失败");
+        throw new Error(getApiErrorMessage(data, "读取会话列表失败"));
       }
 
       setChats(data.chats ?? []);
@@ -390,18 +411,17 @@ export function ChatApp({ initialData }: { initialData: HomePageData }) {
         },
         body: JSON.stringify({ title: nextTitle }),
       });
-      const data = (await response.json()) as {
+      const data = (await response.json()) as ApiErrorPayload & {
         chat?: ChatSummary;
-        error?: string;
       };
 
       if (response.status === 401) {
-        moveToSignedOutState(data.error || sessionExpiredMessage);
+        moveToSignedOutState(getApiErrorMessage(data, sessionExpiredMessage));
         return;
       }
 
       if (!response.ok || !data.chat) {
-        throw new Error(data.error || "更新标题失败");
+        throw new Error(getApiErrorMessage(data, "更新标题失败"));
       }
 
       await loadChatList();
@@ -426,18 +446,17 @@ export function ChatApp({ initialData }: { initialData: HomePageData }) {
       const response = await fetch(`/api/chat?chatId=${chatId}`, {
         method: "DELETE",
       });
-      const data = (await response.json()) as {
-        error?: string;
+      const data = (await response.json()) as ApiErrorPayload & {
         success?: boolean;
       };
 
       if (response.status === 401) {
-        moveToSignedOutState(data.error || sessionExpiredMessage);
+        moveToSignedOutState(getApiErrorMessage(data, sessionExpiredMessage));
         return;
       }
 
       if (!response.ok) {
-        throw new Error(data.error || "删除会话失败");
+        throw new Error(getApiErrorMessage(data, "删除会话失败"));
       }
 
       // 删掉当前会话后，右侧消息区和本地保存的 activeChatId 都要一起清空。
@@ -493,12 +512,10 @@ export function ChatApp({ initialData }: { initialData: HomePageData }) {
           body: JSON.stringify({ email, password }),
         },
       );
-      const data = (await response.json()) as {
-        error?: string;
-      };
+      const data = (await response.json()) as ApiErrorPayload;
 
       if (!response.ok) {
-        throw new Error(getAuthFeedbackMessage(authMode, data.error));
+        throw new Error(getAuthFeedbackMessage(authMode, getApiError(data)));
       }
 
       if (authMode === "register") {
@@ -542,13 +559,12 @@ export function ChatApp({ initialData }: { initialData: HomePageData }) {
         },
         body: JSON.stringify({ email }),
       });
-      const data = (await response.json()) as {
-        error?: string;
+      const data = (await response.json()) as ApiErrorPayload & {
         message?: string;
       };
 
       if (!response.ok) {
-        throw new Error(data.error || "忘记密码请求失败");
+        throw new Error(getApiErrorMessage(data, "忘记密码请求失败"));
       }
 
       setAuthFeedback(
@@ -574,12 +590,10 @@ export function ChatApp({ initialData }: { initialData: HomePageData }) {
       const response = await fetch("/api/auth/logout", {
         method: "POST",
       });
-      const data = (await response.json()) as {
-        error?: string;
-      };
+      const data = (await response.json()) as ApiErrorPayload;
 
       if (!response.ok) {
-        throw new Error(data.error || "退出登录失败");
+        throw new Error(getApiErrorMessage(data, "退出登录失败"));
       }
 
       // 这里先把客户端状态清空，再刷新页面，让服务端重新输出 signed-out 首屏。
@@ -609,10 +623,10 @@ export function ChatApp({ initialData }: { initialData: HomePageData }) {
       const response = await fetch("/api/auth/resend-verification", {
         method: "POST",
       });
-      const data = (await response.json()) as ErrorPayload;
+      const data = (await response.json()) as ApiErrorPayload;
 
       if (!response.ok) {
-        throw new Error(data.error || "重新发送验证邮件失败");
+        throw new Error(getApiErrorMessage(data, "重新发送验证邮件失败"));
       }
 
       setAuthFeedback("验证邮件已重新发送，请检查邮箱。");
@@ -641,17 +655,17 @@ export function ChatApp({ initialData }: { initialData: HomePageData }) {
       const response = await fetch("/api/guest/merge", {
         method: "POST",
       });
-      const data = (await response.json()) as ErrorPayload & {
+      const data = (await response.json()) as ApiErrorPayload & {
         mergedChatCount?: number;
       };
 
       if (response.status === 401) {
-        moveToSignedOutState(data.error || sessionExpiredMessage);
+        moveToSignedOutState(getApiErrorMessage(data, sessionExpiredMessage));
         return;
       }
 
       if (!response.ok) {
-        throw new Error(data.error || "合并游客历史失败");
+        throw new Error(getApiErrorMessage(data, "合并游客历史失败"));
       }
 
       setMergeCandidate(null);
@@ -719,17 +733,18 @@ export function ChatApp({ initialData }: { initialData: HomePageData }) {
       });
 
       if (response.status === 401) {
-        const data = (await response.json()) as ErrorPayload;
-        moveToSignedOutState(data.error || sessionExpiredMessage, {
+        const data = (await response.json()) as ApiErrorPayload;
+        moveToSignedOutState(getApiErrorMessage(data, sessionExpiredMessage), {
           preserveMessages: true,
         });
         return;
       }
 
       if (!response.ok) {
-        const data = (await response.json()) as ErrorPayload;
+        const data = (await response.json()) as ApiErrorPayload;
+        const backendError = getApiErrorMessage(data, "请求失败");
 
-        if (response.status === 403 && data.error === guestTrialLimitMessage) {
+        if (response.status === 403 && backendError === guestTrialLimitMessage) {
           setGuestSession((currentGuestSession) =>
             currentGuestSession
               ? {
@@ -745,7 +760,7 @@ export function ChatApp({ initialData }: { initialData: HomePageData }) {
           throw new Error(guestUpgradeMessage);
         }
 
-        throw new Error(data.error || "请求失败");
+        throw new Error(backendError);
       }
 
       const nextChatId = response.headers.get("x-chat-id");

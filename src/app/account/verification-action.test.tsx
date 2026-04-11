@@ -54,4 +54,29 @@ describe("VerificationAction", () => {
 
     expect(await screen.findByText("Unauthorized")).toBeInTheDocument();
   });
+
+  it("shows a readable message when resend verification returns a structured error", async () => {
+    const user = userEvent.setup();
+
+    vi.spyOn(global, "fetch").mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          error: {
+            code: "auth.email_already_verified",
+            message: "Email is already verified",
+          },
+        }),
+        {
+          status: 400,
+          headers: { "Content-Type": "application/json" },
+        },
+      ),
+    );
+
+    render(<VerificationAction isEmailVerified={false} />);
+
+    await user.click(screen.getByRole("button", { name: "重新发送验证邮件" }));
+
+    expect(await screen.findByText("Email is already verified")).toBeInTheDocument();
+  });
 });

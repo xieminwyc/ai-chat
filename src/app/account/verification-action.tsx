@@ -2,9 +2,7 @@
 
 import { useState } from "react";
 
-type ErrorPayload = {
-  error?: string;
-};
+import { getApiErrorMessage, type ApiErrorPayload } from "@/lib/api-error";
 
 export function VerificationAction({
   isEmailVerified,
@@ -26,10 +24,10 @@ export function VerificationAction({
       const response = await fetch("/api/auth/resend-verification", {
         method: "POST",
       });
-      const data = (await response.json()) as ErrorPayload;
+      const data = (await response.json()) as ApiErrorPayload;
 
       if (!response.ok) {
-        throw new Error(data.error || "重新发送验证邮件失败");
+        throw new Error(getApiErrorMessage(data, "重新发送验证邮件失败"));
       }
 
       setFeedback("验证邮件已重新发送，请检查邮箱。");

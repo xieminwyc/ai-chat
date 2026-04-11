@@ -2,9 +2,7 @@
 
 import { useState } from "react";
 
-type ErrorPayload = {
-  error?: string;
-};
+import { getApiErrorMessage, type ApiErrorPayload } from "@/lib/api-error";
 
 export function PasswordForm() {
   const [currentPassword, setCurrentPassword] = useState("");
@@ -34,10 +32,10 @@ export function PasswordForm() {
           confirmPassword,
         }),
       });
-      const data = (await response.json()) as ErrorPayload;
+      const data = (await response.json()) as ApiErrorPayload;
 
       if (!response.ok) {
-        throw new Error(data.error || "更新密码失败");
+        throw new Error(getApiErrorMessage(data, "更新密码失败"));
       }
 
       setCurrentPassword("");

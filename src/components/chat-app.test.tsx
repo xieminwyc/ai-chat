@@ -616,6 +616,75 @@ describe("ChatApp", () => {
     expect(screen.getByLabelText("密码")).toHaveAttribute("aria-invalid", "true");
   });
 
+  it("shows the same login hint for structured auth errors", async () => {
+    const user = userEvent.setup();
+
+    vi.spyOn(global, "fetch").mockResolvedValue({
+      ok: false,
+      json: async () => ({
+        error: {
+          code: "auth.invalid_credentials",
+          message: "Invalid email or password",
+        },
+      }),
+    } as Response);
+
+    render(
+      <ChatApp
+        initialData={createInitialData({
+          viewerKind: "user",
+          isAuthenticated: false,
+          currentUser: null,
+          guestSession: null,
+        })}
+      />,
+    );
+
+    await user.type(screen.getByLabelText("邮箱"), "alice@example.com");
+    await user.type(screen.getByLabelText("密码"), "wrong-password");
+    await user.click(screen.getByRole("button", { name: "登录并刷新页面" }));
+
+    expect(
+      await screen.findByText(
+        "邮箱或密码不正确。如果你还没注册，可以先切到“注册”创建账号。",
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it("shows a clear Chinese hint when registration fails with a structured error", async () => {
+    const user = userEvent.setup();
+
+    vi.spyOn(global, "fetch").mockResolvedValue({
+      ok: false,
+      json: async () => ({
+        error: {
+          code: "auth.email_already_exists",
+          message: "A user with this email already exists",
+        },
+      }),
+    } as Response);
+
+    render(
+      <ChatApp
+        initialData={createInitialData({
+          viewerKind: "user",
+          isAuthenticated: false,
+          currentUser: null,
+          guestSession: null,
+        })}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "注册" }));
+    await user.type(screen.getByLabelText("邮箱"), "alice@example.com");
+    await user.type(screen.getByLabelText("密码"), "password123");
+    await user.click(screen.getByRole("button", { name: "注册账号" }));
+
+    expect(
+      await screen.findByText("这个邮箱已经注册过了，可以直接切到“登录”。"),
+    ).toBeInTheDocument();
+  });
+
   it("shows a forgot-password entry in login mode", () => {
     render(
       <ChatApp

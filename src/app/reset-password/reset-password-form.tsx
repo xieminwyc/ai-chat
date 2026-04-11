@@ -2,12 +2,10 @@
 
 import { useState } from "react";
 
+import { getApiErrorMessage, type ApiErrorPayload } from "@/lib/api-error";
+
 type ResetPasswordFormProps = {
   token: string;
-};
-
-type ErrorPayload = {
-  error?: string;
 };
 
 export function ResetPasswordForm({ token }: ResetPasswordFormProps) {
@@ -38,10 +36,10 @@ export function ResetPasswordForm({ token }: ResetPasswordFormProps) {
           confirmPassword,
         }),
       });
-      const data = (await response.json()) as ErrorPayload;
+      const data = (await response.json()) as ApiErrorPayload;
 
       if (!response.ok) {
-        throw new Error(data.error || "重置密码失败");
+        throw new Error(getApiErrorMessage(data, "重置密码失败"));
       }
 
       setNextPassword("");

@@ -53,4 +53,33 @@ describe("PasswordForm", () => {
       await screen.findByText("Current password is incorrect"),
     ).toBeInTheDocument();
   });
+
+  it("shows a readable message when the API returns a structured error", async () => {
+    const user = userEvent.setup();
+    vi.spyOn(global, "fetch").mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          error: {
+            code: "auth.current_password_incorrect",
+            message: "Current password is incorrect",
+          },
+        }),
+        {
+          status: 400,
+          headers: { "Content-Type": "application/json" },
+        },
+      ),
+    );
+
+    render(<PasswordForm />);
+
+    await user.type(screen.getByLabelText("当前密码"), "wrong-password");
+    await user.type(screen.getByLabelText("新密码"), "brand-new-password");
+    await user.type(screen.getByLabelText("确认新密码"), "brand-new-password");
+    await user.click(screen.getByRole("button", { name: "更新密码" }));
+
+    expect(
+      await screen.findByText("Current password is incorrect"),
+    ).toBeInTheDocument();
+  });
 });
