@@ -1,6 +1,6 @@
 services:
   redis:
-    image: redis:7-alpine
+    image: registry.cn-hangzhou.aliyuncs.com/library/redis:7-alpine
     # Redis 只给 ai-chat 容器走内部网络，不对公网暴露 6379。
     restart: unless-stopped
     command:
