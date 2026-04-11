@@ -5,6 +5,11 @@ type SendVerificationEmailInput = {
   verificationUrl: string;
 };
 
+type SendPasswordResetEmailInput = {
+  email: string;
+  resetUrl: string;
+};
+
 const resendConfigurationErrorMessages = [
   "RESEND_API_KEY is required to send verification emails.",
   "RESEND_FROM_EMAIL is required to send verification emails.",
@@ -83,5 +88,39 @@ export async function sendVerificationEmail({
 
   if (error) {
     throw new Error(`Failed to send verification email: ${error.message}`);
+  }
+}
+
+export async function sendPasswordResetEmail({
+  email,
+  resetUrl,
+}: SendPasswordResetEmailInput) {
+  const resend = new Resend(getResendApiKey());
+  const from = getResendFromEmail();
+
+  const { error } = await resend.emails.send({
+    from,
+    to: [email],
+    subject: "重置你的 AI Chat 密码",
+    html: [
+      "<div>",
+      "<h1>重置你的 AI Chat 密码</h1>",
+      "<p>点击下面的链接设置新密码：</p>",
+      `<p><a href="${resetUrl}">${resetUrl}</a></p>`,
+      "<p>如果这不是你的操作，可以忽略这封邮件。</p>",
+      "</div>",
+    ].join(""),
+    text: [
+      "重置你的 AI Chat 密码",
+      "",
+      "点击下面的链接设置新密码：",
+      resetUrl,
+      "",
+      "如果这不是你的操作，可以忽略这封邮件。",
+    ].join("\n"),
+  });
+
+  if (error) {
+    throw new Error(`Failed to send password reset email: ${error.message}`);
   }
 }

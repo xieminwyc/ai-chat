@@ -2,15 +2,19 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const repository = vi.hoisted(() => ({
   createEmailVerificationToken: vi.fn(),
+  createPasswordResetToken: vi.fn(),
   createSessionRecord: vi.fn(),
   createUser: vi.fn(),
   deleteUnusedEmailVerificationTokensByUserId: vi.fn(),
+  deleteUnusedPasswordResetTokensByUserId: vi.fn(),
   deleteSessionByToken: vi.fn(),
   findEmailVerificationTokenByHash: vi.fn(),
+  findPasswordResetTokenByHash: vi.fn(),
   findSessionByToken: vi.fn(),
   findUserByEmail: vi.fn(),
   findUserById: vi.fn(),
   markEmailVerificationTokenUsed: vi.fn(),
+  markPasswordResetTokenUsed: vi.fn(),
   markUserEmailVerified: vi.fn(),
   updateUserPasswordHash: vi.fn(),
 }));
@@ -32,9 +36,17 @@ const emailVerification = vi.hoisted(() => ({
   hashEmailVerificationToken: vi.fn(),
 }));
 
+const passwordReset = vi.hoisted(() => ({
+  buildPasswordResetUrl: vi.fn(),
+  createPasswordResetToken: vi.fn(),
+  getPasswordResetExpiresAt: vi.fn(),
+  hashPasswordResetToken: vi.fn(),
+}));
+
 vi.mock("@/server/auth/auth-repository", () => repository);
 vi.mock("@/server/auth/email-verification", () => emailVerification);
 vi.mock("@/server/auth/password", () => password);
+vi.mock("@/server/auth/password-reset", () => passwordReset);
 vi.mock("@/server/auth/session", () => session);
 
 import {
@@ -42,7 +54,9 @@ import {
   getCurrentSession,
   loginUser,
   logoutUser,
+  requestPasswordResetForEmail,
   registerUser,
+  resetPasswordWithToken,
   resendVerificationEmailForUser,
   verifyEmailToken,
 } from "@/server/auth/auth-service";
@@ -390,5 +404,166 @@ describe("auth-service", () => {
       "new-hash",
     );
     expect(result.email).toBe("alice@example.com");
+  });
+
+  it("creates a password reset token for an existing email", async () => {
+    const resetExpiresAt = new Date("2026-04-11T03:00:00.000Z");
+
+    repository.findUserByEmail.mockResolvedValue({
+      id: "user_1",
+      email: "alice@example.com",
+      emailVerifiedAt: null,
+      passwordHash: "hashed-password",
+      createdAt: new Date("2026-04-10T01:00:00.000Z"),
+      updatedAt: new Date("2026-04-10T01:00:00.000Z"),
+    });
+    passwordReset.createPasswordResetToken.mockReturnValue("reset-token");
+    passwordReset.hashPasswordResetToken.mockReturnValue("hashed-reset-token");
+    passwordReset.getPasswordResetExpiresAt.mockReturnValue(resetExpiresAt);
+    passwordReset.buildPasswordResetUrl.mockReturnValue(
+      "http://localhost:3000/reset-password?token=reset-token",
+    );
+
+    const result = await requestPasswordResetForEmail(" Alice@example.com ");
+
+    expect(repository.findUserByEmail).toHaveBeenCalledWith("alice@example.com");
+    expect(repository.deleteUnusedPasswordResetTokensByUserId)
+      .toHaveBeenCalledWith("user_1");
+    expect(repository.createPasswordResetToken).toHaveBeenCalledWith({
+      userId: "user_1",
+      tokenHash: "hashed-reset-token",
+      expiresAt: resetExpiresAt,
+    });
+    expect(result).toEqual({
+      email: "alice@example.com",
+      resetUrl: "http://localhost:3000/reset-password?token=reset-token",
+    });
+  });
+
+  it("returns a safe no-op result for an unknown email during password reset request", async () => {
+    repository.findUserByEmail.mockResolvedValue(null);
+
+    const result = await requestPasswordResetForEmail("nobody@example.com");
+
+    expect(result).toBeNull();
+    expect(repository.createPasswordResetToken).not.toHaveBeenCalled();
+    expect(repository.deleteUnusedPasswordResetTokensByUserId)
+      .not.toHaveBeenCalled();
+  });
+
+  it("rejects password reset when the token cannot be found", async () => {
+    passwordReset.hashPasswordResetToken.mockReturnValue("missing-reset-hash");
+    repository.findPasswordResetTokenByHash.mockResolvedValue(null);
+
+    await expect(
+      resetPasswordWithToken({
+        token: "missing-reset-token",
+        nextPassword: "brand-new-password",
+      }),
+    ).rejects.toThrow("Password reset link is invalid or has already been used");
+  });
+
+  it("rejects password reset when the token has already been used", async () => {
+    passwordReset.hashPasswordResetToken.mockReturnValue("used-reset-hash");
+    repository.findPasswordResetTokenByHash.mockResolvedValue({
+      id: "prt_1",
+      userId: "user_1",
+      tokenHash: "used-reset-hash",
+      expiresAt: new Date("2026-04-11T03:00:00.000Z"),
+      usedAt: new Date("2026-04-11T01:30:00.000Z"),
+      createdAt: new Date("2026-04-11T01:00:00.000Z"),
+      user: {
+        id: "user_1",
+        email: "alice@example.com",
+        emailVerifiedAt: null,
+        passwordHash: "hashed-password",
+        createdAt: new Date("2026-04-10T01:00:00.000Z"),
+        updatedAt: new Date("2026-04-10T01:00:00.000Z"),
+      },
+    });
+
+    await expect(
+      resetPasswordWithToken({
+        token: "used-reset-token",
+        nextPassword: "brand-new-password",
+      }),
+    ).rejects.toThrow("Password reset link is invalid or has already been used");
+  });
+
+  it("rejects password reset when the token is expired", async () => {
+    passwordReset.hashPasswordResetToken.mockReturnValue("expired-reset-hash");
+    repository.findPasswordResetTokenByHash.mockResolvedValue({
+      id: "prt_1",
+      userId: "user_1",
+      tokenHash: "expired-reset-hash",
+      expiresAt: new Date("2026-04-10T23:00:00.000Z"),
+      usedAt: null,
+      createdAt: new Date("2026-04-10T22:00:00.000Z"),
+      user: {
+        id: "user_1",
+        email: "alice@example.com",
+        emailVerifiedAt: null,
+        passwordHash: "hashed-password",
+        createdAt: new Date("2026-04-10T01:00:00.000Z"),
+        updatedAt: new Date("2026-04-10T01:00:00.000Z"),
+      },
+    });
+
+    await expect(
+      resetPasswordWithToken({
+        token: "expired-reset-token",
+        nextPassword: "brand-new-password",
+      }),
+    ).rejects.toThrow("Password reset link has expired");
+  });
+
+  it("hashes the new password and consumes the reset token", async () => {
+    const now = new Date("2026-04-11T02:00:00.000Z");
+    vi.useFakeTimers();
+    vi.setSystemTime(now);
+
+    passwordReset.hashPasswordResetToken.mockReturnValue("valid-reset-hash");
+    repository.findPasswordResetTokenByHash.mockResolvedValue({
+      id: "prt_1",
+      userId: "user_1",
+      tokenHash: "valid-reset-hash",
+      expiresAt: new Date("2026-04-11T03:00:00.000Z"),
+      usedAt: null,
+      createdAt: new Date("2026-04-11T01:00:00.000Z"),
+      user: {
+        id: "user_1",
+        email: "alice@example.com",
+        emailVerifiedAt: null,
+        passwordHash: "old-password-hash",
+        createdAt: new Date("2026-04-10T01:00:00.000Z"),
+        updatedAt: new Date("2026-04-10T01:00:00.000Z"),
+      },
+    });
+    password.hashPassword.mockResolvedValue("new-password-hash");
+    repository.updateUserPasswordHash.mockResolvedValue({
+      id: "user_1",
+      email: "alice@example.com",
+      emailVerifiedAt: null,
+      createdAt: new Date("2026-04-10T01:00:00.000Z"),
+      updatedAt: now,
+    });
+
+    const result = await resetPasswordWithToken({
+      token: "valid-reset-token",
+      nextPassword: "brand-new-password",
+    });
+
+    expect(password.hashPassword).toHaveBeenCalledWith("brand-new-password");
+    expect(repository.updateUserPasswordHash).toHaveBeenCalledWith(
+      "user_1",
+      "new-password-hash",
+    );
+    expect(repository.markPasswordResetTokenUsed).toHaveBeenCalledWith(
+      "prt_1",
+      now,
+    );
+    expect(result.email).toBe("alice@example.com");
+
+    vi.useRealTimers();
   });
 });

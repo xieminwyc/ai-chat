@@ -218,6 +218,78 @@
   - 新增 `src/app/settings/page.tsx`，在 Server Component 中读取 cookie、解析 entry state，并对 `verified` 访问要求执行重定向保护
   - 新增 `src/app/account/page.test.tsx` 和 `src/app/settings/page.test.tsx`，覆盖未登录重定向、未验证访问限制与已验证渲染路径
   - 构建阶段发现 `/account` 需要显式状态收窄后，补上联合类型保护分支，保证 Next.js 16 构建通过
+
+## Session: 2026-04-11 (Forgot Password & Reset Flow)
+
+### Phase 1: Design & Token Model
+- **Status:** complete
+- Actions taken:
+  - 复用已批准的忘记密码设计与实现计划，确认采用“内部校验邮箱存在、外部统一成功反馈”的恢复策略
+  - 在 Prisma schema 中新增 `PasswordResetToken` 模型，并为 `User` 补上对应关联
+  - 新增 reset token helper，统一处理 token 生成、hash、过期时间与重置链接拼装
+- Files created/modified:
+  - `docs/superpowers/specs/2026-04-11-forgot-password-and-reset-flow-design.md` (created)
+  - `docs/superpowers/plans/2026-04-11-forgot-password-and-reset-flow-implementation.md` (created)
+  - `prisma/schema.prisma` (updated)
+  - `prisma/migrations/20260411093000_add_password_reset_tokens/migration.sql` (created)
+  - `src/server/auth/password-reset.ts` (created)
+  - `src/server/auth/password-reset.test.ts` (created)
+
+### Phase 2: Service / Repository / Delivery
+- **Status:** complete
+- Actions taken:
+  - 扩展 auth type 与 repository，补齐 reset token 的创建、查询、消费与旧 token 清理
+  - 在 `auth-service` 中新增 `requestPasswordResetForEmail()` 与 `resetPasswordWithToken()`
+  - 扩展邮件发送层，新增 password reset 邮件模板与聚焦测试
+- Files created/modified:
+  - `src/server/auth/auth-types.ts` (updated)
+  - `src/server/auth/auth-repository.ts` (updated)
+  - `src/server/auth/auth-repository.test.ts` (updated)
+  - `src/server/auth/auth-service.ts` (updated)
+  - `src/server/auth/auth-service.test.ts` (updated)
+  - `src/server/auth/email-delivery.ts` (updated)
+  - `src/server/auth/email-delivery.test.ts` (updated)
+
+### Phase 3: Route & UI Flow
+- **Status:** complete
+- Actions taken:
+  - 新增 `forgot-password` / `reset-password` schema 与对应 Route Handler
+  - 在登录面板增加“忘记密码？”入口、邮件发送子视图与统一成功提示
+  - 新增 `/reset-password` 页面与客户端表单，完成 token + 新密码提交链路
+- Files created/modified:
+  - `src/server/auth/auth-schemas.ts` (updated)
+  - `src/app/api/auth/forgot-password/route.ts` (created)
+  - `src/app/api/auth/forgot-password/route.test.ts` (created)
+  - `src/app/api/auth/reset-password/route.ts` (created)
+  - `src/app/api/auth/reset-password/route.test.ts` (created)
+  - `src/components/chat-app.tsx` (updated)
+  - `src/components/chat-app.test.tsx` (updated)
+  - `src/app/reset-password/page.tsx` (created)
+  - `src/app/reset-password/page.test.tsx` (created)
+  - `src/app/reset-password/reset-password-form.tsx` (created)
+  - `src/app/reset-password/reset-password-form.test.tsx` (created)
+
+### Phase 4: Verification
+- **Status:** complete with one pre-existing lint warning
+- Actions taken:
+  - 运行 `npx prisma generate`，让 Prisma Client 跟上新增 `PasswordResetToken`
+  - 运行聚焦测试：
+    - `npm test -- src/server/auth/password-reset.test.ts`
+    - `npm test -- src/server/auth/auth-repository.test.ts`
+    - `npm test -- src/server/auth/auth-service.test.ts`
+    - `npm test -- src/server/auth/email-delivery.test.ts`
+    - `npm test -- src/app/api/auth/forgot-password/route.test.ts`
+    - `npm test -- src/app/api/auth/reset-password/route.test.ts`
+    - `npm test -- src/components/chat-app.test.tsx`
+    - `npm test -- src/app/reset-password/page.test.tsx src/app/reset-password/reset-password-form.test.tsx`
+  - 运行 `npm run build`，Next.js 16 生产构建通过，新路由已进入构建产物
+  - 运行 `npm run lint`，仍只剩 `src/server/chat/chat-auth.test.ts` 的既有未使用导入 warning
+- Files created/modified:
+  - `progress.md` (updated)
+
+### Next Suggested Slice
+- 继续把登录体系补成闭环时，优先考虑“登录设备/会话撤销”或“邮件发送频率限制 + abuse guard”
+- 如果你想继续学后端，下一块最值得看的就是“有状态安全流程的一致性”: token 生命周期、并发消费、速率限制、审计日志
 - Files created/modified:
   - `src/app/account/page.tsx` (created)
   - `src/app/account/page.test.tsx` (created)

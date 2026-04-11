@@ -53,3 +53,22 @@ export type CreateEmailVerificationTokenInput = {
   tokenHash: string;
   expiresAt: Date;
 };
+
+export type PasswordResetTokenRecord = {
+  id: string;
+  userId: string;
+  tokenHash: string;
+  expiresAt: Date;
+  usedAt: Date | null;
+  createdAt: Date;
+};
+
+export type PasswordResetTokenWithUser = PasswordResetTokenRecord & {
+  user: AuthUserRecord;
+};
+
+export type CreatePasswordResetTokenInput = {
+  userId: string;
+  tokenHash: string;
+  expiresAt: Date;
+};

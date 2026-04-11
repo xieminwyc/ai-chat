@@ -18,6 +18,12 @@ const { prisma } = vi.hoisted(() => ({
       findUnique: vi.fn(),
       update: vi.fn(),
     },
+    passwordResetToken: {
+      create: vi.fn(),
+      deleteMany: vi.fn(),
+      findUnique: vi.fn(),
+      update: vi.fn(),
+    },
   },
 }));
 
@@ -27,16 +33,21 @@ vi.mock("@/lib/prisma", () => ({
 
 import {
   createEmailVerificationToken,
+  createPasswordResetToken,
   createSessionRecord,
   createUser,
   deleteUnusedEmailVerificationTokensByUserId,
+  deleteUnusedPasswordResetTokensByUserId,
   deleteSessionByToken,
   findEmailVerificationTokenByHash,
+  findPasswordResetTokenByHash,
   findSessionByToken,
   findUserByEmail,
   findUserById,
   markEmailVerificationTokenUsed,
+  markPasswordResetTokenUsed,
   markUserEmailVerified,
+  updateUserPasswordHash,
 } from "@/server/auth/auth-repository";
 
 describe("auth-repository", () => {
@@ -291,6 +302,109 @@ describe("auth-repository", () => {
     });
   });
 
+  it("creates, finds, and consumes password reset tokens", async () => {
+    const expiresAt = new Date("2026-04-11T10:00:00.000Z");
+    const usedAt = new Date("2026-04-11T09:30:00.000Z");
+
+    prisma.passwordResetToken.create.mockResolvedValue({
+      id: "prt_1",
+      userId: "user_1",
+      tokenHash: "hashed-reset-token",
+      expiresAt,
+      usedAt: null,
+      createdAt: new Date("2026-04-11T09:00:00.000Z"),
+    });
+    prisma.passwordResetToken.findUnique.mockResolvedValue({
+      id: "prt_1",
+      userId: "user_1",
+      tokenHash: "hashed-reset-token",
+      expiresAt,
+      usedAt: null,
+      createdAt: new Date("2026-04-11T09:00:00.000Z"),
+      user: {
+        id: "user_1",
+        email: "alice@example.com",
+        emailVerifiedAt: new Date("2026-04-10T00:00:00.000Z"),
+        passwordHash: "hashed-password",
+        createdAt: new Date("2026-04-08T01:00:00.000Z"),
+        updatedAt: new Date("2026-04-08T01:00:00.000Z"),
+      },
+    });
+    prisma.passwordResetToken.update.mockResolvedValue({
+      id: "prt_1",
+      userId: "user_1",
+      tokenHash: "hashed-reset-token",
+      expiresAt,
+      usedAt,
+      createdAt: new Date("2026-04-11T09:00:00.000Z"),
+    });
+    prisma.passwordResetToken.deleteMany.mockResolvedValue({ count: 1 });
+
+    await createPasswordResetToken({
+      userId: "user_1",
+      tokenHash: "hashed-reset-token",
+      expiresAt,
+    });
+    await findPasswordResetTokenByHash("hashed-reset-token");
+    await markPasswordResetTokenUsed("prt_1", usedAt);
+    await deleteUnusedPasswordResetTokensByUserId("user_1");
+
+    expect(prisma.passwordResetToken.create).toHaveBeenCalledWith({
+      data: {
+        userId: "user_1",
+        tokenHash: "hashed-reset-token",
+        expiresAt,
+      },
+      select: {
+        id: true,
+        userId: true,
+        tokenHash: true,
+        expiresAt: true,
+        usedAt: true,
+        createdAt: true,
+      },
+    });
+    expect(prisma.passwordResetToken.findUnique).toHaveBeenCalledWith({
+      where: { tokenHash: "hashed-reset-token" },
+      select: {
+        id: true,
+        userId: true,
+        tokenHash: true,
+        expiresAt: true,
+        usedAt: true,
+        createdAt: true,
+        user: {
+          select: {
+            id: true,
+            email: true,
+            emailVerifiedAt: true,
+            passwordHash: true,
+            createdAt: true,
+            updatedAt: true,
+          },
+        },
+      },
+    });
+    expect(prisma.passwordResetToken.update).toHaveBeenCalledWith({
+      where: { id: "prt_1" },
+      data: { usedAt },
+      select: {
+        id: true,
+        userId: true,
+        tokenHash: true,
+        expiresAt: true,
+        usedAt: true,
+        createdAt: true,
+      },
+    });
+    expect(prisma.passwordResetToken.deleteMany).toHaveBeenCalledWith({
+      where: {
+        userId: "user_1",
+        usedAt: null,
+      },
+    });
+  });
+
   it("marks the user verified and clears unused verification tokens", async () => {
     const verifiedAt = new Date("2026-04-09T02:00:00.000Z");
 
@@ -321,6 +435,30 @@ describe("auth-repository", () => {
       where: {
         userId: "user_1",
         usedAt: null,
+      },
+    });
+  });
+
+  it("updates a user password hash while still returning safe fields", async () => {
+    prisma.user.update.mockResolvedValue({
+      id: "user_1",
+      email: "alice@example.com",
+      emailVerifiedAt: new Date("2026-04-08T01:00:00.000Z"),
+      createdAt: new Date("2026-04-07T00:00:00.000Z"),
+      updatedAt: new Date("2026-04-11T09:00:00.000Z"),
+    });
+
+    await updateUserPasswordHash("user_1", "new-hash");
+
+    expect(prisma.user.update).toHaveBeenCalledWith({
+      where: { id: "user_1" },
+      data: { passwordHash: "new-hash" },
+      select: {
+        id: true,
+        email: true,
+        emailVerifiedAt: true,
+        createdAt: true,
+        updatedAt: true,
       },
     });
   });

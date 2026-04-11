@@ -12,9 +12,24 @@ export const loginSchema = z.object({
   password: z.string().min(1),
 });
 
+export const forgotPasswordSchema = z.object({
+  email: z.string().trim().email(),
+});
+
 export const changePasswordSchema = z
   .object({
     currentPassword: z.string().min(1),
+    nextPassword: z.string().min(8).max(72),
+    confirmPassword: z.string().min(1),
+  })
+  .refine((data) => data.nextPassword === data.confirmPassword, {
+    message: "Passwords do not match",
+    path: ["confirmPassword"],
+  });
+
+export const resetPasswordSchema = z
+  .object({
+    token: z.string().min(1),
     nextPassword: z.string().min(8).max(72),
     confirmPassword: z.string().min(1),
   })

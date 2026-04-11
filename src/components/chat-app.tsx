@@ -120,6 +120,7 @@ export function ChatApp({ initialData }: { initialData: HomePageData }) {
   const [titleDraft, setTitleDraft] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [authMode, setAuthMode] = useState<AuthMode>("login");
+  const [isForgotPasswordView, setIsForgotPasswordView] = useState(false);
   const [authEmail, setAuthEmail] = useState("");
   const [authPassword, setAuthPassword] = useState("");
   const [authFeedback, setAuthFeedback] = useState<string | null>(null);
@@ -224,6 +225,7 @@ export function ChatApp({ initialData }: { initialData: HomePageData }) {
     setTitleDraft("");
     setError(message);
     setAuthMode("login");
+    setIsForgotPasswordView(false);
     setAuthEmail(rememberedEmail);
     setAuthPassword("");
     setAuthFeedback(message);
@@ -511,6 +513,53 @@ export function ChatApp({ initialData }: { initialData: HomePageData }) {
       window.location.reload();
     } catch (error) {
       setAuthFeedback(error instanceof Error ? error.message : "认证请求失败");
+      setAuthFeedbackTone("error");
+    } finally {
+      setIsAuthSubmitting(false);
+    }
+  }
+
+  async function handleForgotPasswordSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    const email = authEmail.trim();
+
+    if (!email) {
+      setAuthFeedback("请先填写邮箱");
+      setAuthFeedbackTone("error");
+      return;
+    }
+
+    setIsAuthSubmitting(true);
+    setAuthFeedback(null);
+    setAuthFeedbackTone(null);
+
+    try {
+      const response = await fetch("/api/auth/forgot-password", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ email }),
+      });
+      const data = (await response.json()) as {
+        error?: string;
+        message?: string;
+      };
+
+      if (!response.ok) {
+        throw new Error(data.error || "忘记密码请求失败");
+      }
+
+      setAuthFeedback(
+        data.message || "如果该邮箱已注册，我们会向你发送重置密码邮件。",
+      );
+      setAuthFeedbackTone("success");
+      setAuthPassword("");
+    } catch (error) {
+      setAuthFeedback(
+        error instanceof Error ? error.message : "忘记密码请求失败",
+      );
       setAuthFeedbackTone("error");
     } finally {
       setIsAuthSubmitting(false);
@@ -918,12 +967,13 @@ export function ChatApp({ initialData }: { initialData: HomePageData }) {
         <div className="mt-7 flex gap-2">
           <button
             className={`inline-flex min-h-11 flex-1 items-center justify-center rounded-full px-4 py-3 text-sm font-medium transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-500/30 ${
-              authMode === "login"
+              authMode === "login" && !isForgotPasswordView
                 ? "bg-slate-900 text-white"
                 : "border border-[rgba(24,48,59,0.12)] bg-white text-slate-700"
             }`}
             onClick={() => {
               setAuthMode("login");
+              setIsForgotPasswordView(false);
               setAuthFeedback(null);
               setAuthFeedbackTone(null);
             }}
@@ -933,12 +983,13 @@ export function ChatApp({ initialData }: { initialData: HomePageData }) {
           </button>
           <button
             className={`inline-flex min-h-11 flex-1 items-center justify-center rounded-full px-4 py-3 text-sm font-medium transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-500/30 ${
-              authMode === "register"
+              authMode === "register" && !isForgotPasswordView
                 ? "bg-slate-900 text-white"
                 : "border border-[rgba(24,48,59,0.12)] bg-white text-slate-700"
             }`}
             onClick={() => {
               setAuthMode("register");
+              setIsForgotPasswordView(false);
               setAuthFeedback(null);
               setAuthFeedbackTone(null);
             }}
@@ -948,9 +999,22 @@ export function ChatApp({ initialData }: { initialData: HomePageData }) {
           </button>
         </div>
 
+        {isForgotPasswordView ? (
+          <div className="mt-5 space-y-2">
+            <h4 className="text-lg font-semibold text-slate-900">
+              找回你的账号密码
+            </h4>
+            <p className="text-sm leading-7 text-slate-600">
+              输入注册邮箱，我们会发送一封带一次性重置链接的邮件给你。
+            </p>
+          </div>
+        ) : null}
+
         <form
           className={isCompact ? "mt-5 grid gap-4 lg:grid-cols-2" : "mt-6 space-y-4"}
-          onSubmit={handleAuthSubmit}
+          onSubmit={
+            isForgotPasswordView ? handleForgotPasswordSubmit : handleAuthSubmit
+          }
         >
           <label className="block text-sm font-medium text-slate-700">
             <span className="mb-2 block">邮箱</span>
@@ -974,30 +1038,32 @@ export function ChatApp({ initialData }: { initialData: HomePageData }) {
               value={authEmail}
             />
           </label>
-          <label className="block text-sm font-medium text-slate-700">
-            <span className="mb-2 block">密码</span>
-            <input
-              autoComplete={
-                authMode === "login" ? "current-password" : "new-password"
-              }
-              aria-invalid={hasAuthError ? true : undefined}
-              className={`min-h-11 w-full rounded-2xl border bg-white/90 px-4 py-3 text-sm text-slate-900 outline-none transition focus:ring-4 ${
-                hasAuthError
-                  ? "border-red-300 focus:border-red-400 focus:ring-red-100"
-                  : "border-[rgba(24,48,59,0.12)] focus:border-slate-400 focus:ring-slate-200/60"
-              }`}
-              onChange={(event) => {
-                setAuthPassword(event.target.value);
-                if (authFeedback) {
-                  setAuthFeedback(null);
-                  setAuthFeedbackTone(null);
+          {isForgotPasswordView ? null : (
+            <label className="block text-sm font-medium text-slate-700">
+              <span className="mb-2 block">密码</span>
+              <input
+                autoComplete={
+                  authMode === "login" ? "current-password" : "new-password"
                 }
-              }}
-              placeholder="至少 8 位"
-              type="password"
-              value={authPassword}
-            />
-          </label>
+                aria-invalid={hasAuthError ? true : undefined}
+                className={`min-h-11 w-full rounded-2xl border bg-white/90 px-4 py-3 text-sm text-slate-900 outline-none transition focus:ring-4 ${
+                  hasAuthError
+                    ? "border-red-300 focus:border-red-400 focus:ring-red-100"
+                    : "border-[rgba(24,48,59,0.12)] focus:border-slate-400 focus:ring-slate-200/60"
+                }`}
+                onChange={(event) => {
+                  setAuthPassword(event.target.value);
+                  if (authFeedback) {
+                    setAuthFeedback(null);
+                    setAuthFeedbackTone(null);
+                  }
+                }}
+                placeholder="至少 8 位"
+                type="password"
+                value={authPassword}
+              />
+            </label>
+          )}
 
           {authFeedback ? (
             <div
@@ -1013,6 +1079,36 @@ export function ChatApp({ initialData }: { initialData: HomePageData }) {
           ) : null}
 
           <div className={isCompact ? "lg:col-span-2" : ""}>
+            {isForgotPasswordView ? (
+              <div className="mb-3 flex items-center justify-end">
+                <button
+                  className="text-sm font-medium text-slate-600 transition hover:text-slate-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-500/30"
+                  onClick={() => {
+                    setIsForgotPasswordView(false);
+                    setAuthFeedback(null);
+                    setAuthFeedbackTone(null);
+                  }}
+                  type="button"
+                >
+                  返回登录
+                </button>
+              </div>
+            ) : authMode === "login" ? (
+              <div className="mb-3 flex items-center justify-end">
+                <button
+                  className="text-sm font-medium text-slate-600 transition hover:text-slate-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-500/30"
+                  onClick={() => {
+                    setIsForgotPasswordView(true);
+                    setAuthFeedback(null);
+                    setAuthFeedbackTone(null);
+                    setAuthPassword("");
+                  }}
+                  type="button"
+                >
+                  忘记密码？
+                </button>
+              </div>
+            ) : null}
             <button
               className="inline-flex min-h-11 w-full items-center justify-center rounded-full bg-[linear-gradient(135deg,#18303b,#325869)] px-5 py-3 text-sm font-semibold text-white shadow-[0_14px_28px_rgba(24,48,59,0.2)] transition hover:translate-y-[-1px] hover:shadow-[0_18px_32px_rgba(24,48,59,0.24)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-500/40 disabled:cursor-not-allowed disabled:translate-y-0 disabled:opacity-60"
               disabled={isAuthSubmitting}
@@ -1020,7 +1116,9 @@ export function ChatApp({ initialData }: { initialData: HomePageData }) {
             >
               {isAuthSubmitting
                 ? "提交中..."
-                : authMode === "login"
+                : isForgotPasswordView
+                  ? "发送重置邮件"
+                  : authMode === "login"
                   ? "登录并刷新页面"
                   : "注册账号"}
             </button>
@@ -1073,6 +1171,7 @@ export function ChatApp({ initialData }: { initialData: HomePageData }) {
 
   function openGuestAuthPanel(nextMode: AuthMode) {
     setAuthMode(nextMode);
+    setIsForgotPasswordView(false);
     setAuthFeedback(null);
     setAuthFeedbackTone(null);
     setIsGuestAuthPanelVisible(true);

@@ -17,7 +17,10 @@ vi.mock("resend", () => ({
   },
 }));
 
-import { sendVerificationEmail } from "@/server/auth/email-delivery";
+import {
+  sendPasswordResetEmail,
+  sendVerificationEmail,
+} from "@/server/auth/email-delivery";
 
 describe("email-delivery", () => {
   const originalEnv = process.env;
@@ -70,6 +73,32 @@ describe("email-delivery", () => {
       ),
       text: expect.stringContaining(
         "http://localhost:3000/verify-email?token=test-token",
+      ),
+    });
+  });
+
+  it("sends a password reset email through Resend", async () => {
+    resendState.send.mockResolvedValue({
+      data: {
+        id: "email_456",
+      },
+      error: null,
+    });
+
+    await sendPasswordResetEmail({
+      email: "alice@example.com",
+      resetUrl: "http://localhost:3000/reset-password?token=reset-token",
+    });
+
+    expect(resendState.send).toHaveBeenCalledWith({
+      from: "AI Chat <onboarding@example.com>",
+      to: ["alice@example.com"],
+      subject: "重置你的 AI Chat 密码",
+      html: expect.stringContaining(
+        "http://localhost:3000/reset-password?token=reset-token",
+      ),
+      text: expect.stringContaining(
+        "http://localhost:3000/reset-password?token=reset-token",
       ),
     });
   });

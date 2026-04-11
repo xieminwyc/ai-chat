@@ -6,9 +6,12 @@ import type {
   AuthUserSummary,
   CreateSessionInput,
   CreateEmailVerificationTokenInput,
+  CreatePasswordResetTokenInput,
   CreateUserInput,
   EmailVerificationTokenRecord,
   EmailVerificationTokenWithUser,
+  PasswordResetTokenRecord,
+  PasswordResetTokenWithUser,
 } from "@/server/auth/auth-types";
 
 const authUserSummarySelect = {
@@ -25,6 +28,15 @@ const authUserRecordSelect = {
 } as const;
 
 const emailVerificationTokenRecordSelect = {
+  id: true,
+  userId: true,
+  tokenHash: true,
+  expiresAt: true,
+  usedAt: true,
+  createdAt: true,
+} as const;
+
+const passwordResetTokenRecordSelect = {
   id: true,
   userId: true,
   tokenHash: true,
@@ -113,6 +125,15 @@ export async function createEmailVerificationToken(
   });
 }
 
+export async function createPasswordResetToken(
+  data: CreatePasswordResetTokenInput,
+): Promise<PasswordResetTokenRecord> {
+  return prisma.passwordResetToken.create({
+    data,
+    select: passwordResetTokenRecordSelect,
+  });
+}
+
 export async function findEmailVerificationTokenByHash(
   tokenHash: string,
 ): Promise<EmailVerificationTokenWithUser | null> {
@@ -120,6 +141,20 @@ export async function findEmailVerificationTokenByHash(
     where: { tokenHash },
     select: {
       ...emailVerificationTokenRecordSelect,
+      user: {
+        select: authUserRecordSelect,
+      },
+    },
+  });
+}
+
+export async function findPasswordResetTokenByHash(
+  tokenHash: string,
+): Promise<PasswordResetTokenWithUser | null> {
+  return prisma.passwordResetToken.findUnique({
+    where: { tokenHash },
+    select: {
+      ...passwordResetTokenRecordSelect,
       user: {
         select: authUserRecordSelect,
       },
@@ -138,8 +173,28 @@ export async function markEmailVerificationTokenUsed(
   });
 }
 
+export async function markPasswordResetTokenUsed(
+  id: string,
+  usedAt: Date,
+): Promise<PasswordResetTokenRecord> {
+  return prisma.passwordResetToken.update({
+    where: { id },
+    data: { usedAt },
+    select: passwordResetTokenRecordSelect,
+  });
+}
+
 export async function deleteUnusedEmailVerificationTokensByUserId(userId: string) {
   return prisma.emailVerificationToken.deleteMany({
+    where: {
+      userId,
+      usedAt: null,
+    },
+  });
+}
+
+export async function deleteUnusedPasswordResetTokensByUserId(userId: string) {
+  return prisma.passwordResetToken.deleteMany({
     where: {
       userId,
       usedAt: null,

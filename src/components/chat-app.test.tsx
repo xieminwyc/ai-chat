@@ -616,6 +616,91 @@ describe("ChatApp", () => {
     expect(screen.getByLabelText("密码")).toHaveAttribute("aria-invalid", "true");
   });
 
+  it("shows a forgot-password entry in login mode", () => {
+    render(
+      <ChatApp
+        initialData={createInitialData({
+          viewerKind: "user",
+          isAuthenticated: false,
+          currentUser: null,
+          guestSession: null,
+        })}
+      />,
+    );
+
+    expect(
+      screen.getByRole("button", { name: "忘记密码？" }),
+    ).toBeInTheDocument();
+  });
+
+  it("switches to the forgot-password request view and back to login", async () => {
+    const user = userEvent.setup();
+
+    render(
+      <ChatApp
+        initialData={createInitialData({
+          viewerKind: "user",
+          isAuthenticated: false,
+          currentUser: null,
+          guestSession: null,
+        })}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "忘记密码？" }));
+
+    expect(screen.getByText("找回你的账号密码")).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "发送重置邮件" }),
+    ).toBeInTheDocument();
+    expect(screen.queryByLabelText("密码")).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "返回登录" }));
+
+    expect(screen.getByRole("button", { name: "登录并刷新页面" })).toBeInTheDocument();
+    expect(screen.getByLabelText("密码")).toBeInTheDocument();
+  });
+
+  it("submits forgot-password and shows the unified success copy", async () => {
+    const user = userEvent.setup();
+
+    vi.spyOn(global, "fetch").mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        success: true,
+        message: "如果该邮箱已注册，我们会向你发送重置密码邮件。",
+      }),
+    } as Response);
+
+    render(
+      <ChatApp
+        initialData={createInitialData({
+          viewerKind: "user",
+          isAuthenticated: false,
+          currentUser: null,
+          guestSession: null,
+        })}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "忘记密码？" }));
+    await user.type(screen.getByLabelText("邮箱"), "alice@example.com");
+    await user.click(screen.getByRole("button", { name: "发送重置邮件" }));
+
+    expect(global.fetch).toHaveBeenCalledWith("/api/auth/forgot-password", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        email: "alice@example.com",
+      }),
+    });
+    expect(
+      await screen.findByText("如果该邮箱已注册，我们会向你发送重置密码邮件。"),
+    ).toBeInTheDocument();
+  });
+
   it("auto-scrolls the message viewport when initial history is provided", async () => {
     const scrollTo = vi.fn();
 

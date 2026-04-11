@@ -1,14 +1,18 @@
 import {
   createEmailVerificationToken as createEmailVerificationTokenRecord,
+  createPasswordResetToken as createPasswordResetTokenRecord,
   createSessionRecord,
   createUser,
   deleteUnusedEmailVerificationTokensByUserId,
+  deleteUnusedPasswordResetTokensByUserId,
   deleteSessionByToken,
   findEmailVerificationTokenByHash,
+  findPasswordResetTokenByHash,
   findSessionByToken,
   findUserByEmail,
   findUserById,
   markEmailVerificationTokenUsed,
+  markPasswordResetTokenUsed,
   markUserEmailVerified,
   updateUserPasswordHash,
 } from "@/server/auth/auth-repository";
@@ -19,6 +23,12 @@ import {
   hashEmailVerificationToken,
 } from "@/server/auth/email-verification";
 import { hashPassword, verifyPassword } from "@/server/auth/password";
+import {
+  buildPasswordResetUrl,
+  createPasswordResetToken,
+  getPasswordResetExpiresAt,
+  hashPasswordResetToken,
+} from "@/server/auth/password-reset";
 import { createSessionToken, getSessionExpiresAt } from "@/server/auth/session";
 
 type RegisterUserInput = {
@@ -210,4 +220,62 @@ export async function changePasswordForUser({
   const nextPasswordHash = await hashPassword(nextPassword);
 
   return updateUserPasswordHash(userId, nextPasswordHash);
+}
+
+export async function requestPasswordResetForEmail(email: string) {
+  const normalizedEmail = normalizeEmail(email);
+  const user = await findUserByEmail(normalizedEmail);
+
+  if (!user) {
+    return null;
+  }
+
+  const rawToken = createPasswordResetToken();
+  const expiresAt = getPasswordResetExpiresAt();
+  const tokenHash = hashPasswordResetToken(rawToken);
+
+  await deleteUnusedPasswordResetTokensByUserId(user.id);
+  await createPasswordResetTokenRecord({
+    userId: user.id,
+    tokenHash,
+    expiresAt,
+  });
+
+  return {
+    email: user.email,
+    resetUrl: buildPasswordResetUrl(rawToken),
+  };
+}
+
+export async function resetPasswordWithToken({
+  token,
+  nextPassword,
+}: {
+  token: string;
+  nextPassword: string;
+}) {
+  const tokenHash = hashPasswordResetToken(token);
+  const resetToken = await findPasswordResetTokenByHash(tokenHash);
+
+  if (!resetToken || resetToken.usedAt) {
+    throw new Error("Password reset link is invalid or has already been used");
+  }
+
+  if (resetToken.expiresAt.getTime() <= Date.now()) {
+    throw new Error("Password reset link has expired");
+  }
+
+  const nextPasswordHash = await hashPassword(nextPassword);
+  const usedAt = new Date();
+
+  await updateUserPasswordHash(resetToken.userId, nextPasswordHash);
+  await markPasswordResetTokenUsed(resetToken.id, usedAt);
+
+  return {
+    id: resetToken.user.id,
+    email: resetToken.user.email,
+    emailVerifiedAt: resetToken.user.emailVerifiedAt,
+    createdAt: resetToken.user.createdAt,
+    updatedAt: usedAt,
+  };
 }
