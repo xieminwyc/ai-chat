@@ -4,7 +4,6 @@ import {
   assertChatOwner,
   requireAuthenticatedUser,
   requireVerifiedUser,
-  UnauthorizedError,
   ForbiddenError,
 } from "@/server/chat/chat-auth";
 

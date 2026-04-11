@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useState } from "react";
 
 import { getApiErrorMessage, type ApiErrorPayload } from "@/lib/api-error";
@@ -70,12 +71,12 @@ export function ResetPasswordForm({ token }: ResetPasswordFormProps) {
         <p className="text-sm text-emerald-700" role="status">
           {feedback}
         </p>
-        <a
+        <Link
           className="inline-flex min-h-11 w-fit items-center justify-center rounded-full bg-slate-900 px-5 py-3 text-sm font-semibold text-white transition hover:bg-slate-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-500/30"
           href="/"
         >
           返回登录
-        </a>
+        </Link>
       </div>
     );
   }

@@ -3,7 +3,6 @@ import { NextResponse } from "next/server";
 import {
   getAllUserSessions,
   revokeAllOtherSessions,
-  revokeSessionById,
 } from "@/server/auth/auth-service";
 import { getCurrentSession } from "@/server/auth/auth-service";
 import { readSessionTokenFromCookieHeader } from "@/server/auth/session";
