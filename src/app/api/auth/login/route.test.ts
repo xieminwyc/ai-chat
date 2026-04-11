@@ -4,7 +4,12 @@ const authService = vi.hoisted(() => ({
   loginUser: vi.fn(),
 }));
 
+const rateLimitPolicies = vi.hoisted(() => ({
+  enforceLoginRateLimit: vi.fn(),
+}));
+
 vi.mock("@/server/auth/auth-service", () => authService);
+vi.mock("@/server/rate-limit/rate-limit-policies", () => rateLimitPolicies);
 
 import { POST } from "@/app/api/auth/login/route";
 
@@ -23,6 +28,7 @@ function createRouteError(
 describe("/api/auth/login route", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    rateLimitPolicies.enforceLoginRateLimit.mockResolvedValue(undefined);
   });
 
   it("logs a user in and sets the session cookie", async () => {
@@ -42,6 +48,7 @@ describe("/api/auth/login route", () => {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
+          "x-forwarded-for": "203.0.113.10",
         },
         body: JSON.stringify({
           email: "alice@example.com",
@@ -54,6 +61,10 @@ describe("/api/auth/login route", () => {
     const setCookie = response.headers.get("set-cookie");
 
     expect(response.status).toBe(200);
+    expect(rateLimitPolicies.enforceLoginRateLimit).toHaveBeenCalledWith({
+      email: "alice@example.com",
+      ipAddress: "203.0.113.10",
+    });
     expect(setCookie).toContain("ai-chat-session=session-token");
     expect(data.user.email).toBe("alice@example.com");
   });
@@ -87,5 +98,38 @@ describe("/api/auth/login route", () => {
         message: "Invalid email or password",
       },
     });
+  });
+
+  it("returns 429 when the login rate limit has been exceeded", async () => {
+    rateLimitPolicies.enforceLoginRateLimit.mockRejectedValue(
+      createRouteError(
+        "rate_limit.exceeded",
+        429,
+        "Too many login attempts. Please try again later.",
+      ),
+    );
+
+    const response = await POST(
+      new Request("http://localhost:3000/api/auth/login", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-forwarded-for": "203.0.113.10",
+        },
+        body: JSON.stringify({
+          email: "alice@example.com",
+          password: "super-secret-password",
+        }),
+      }),
+    );
+
+    expect(response.status).toBe(429);
+    await expect(response.json()).resolves.toEqual({
+      error: {
+        code: "rate_limit.exceeded",
+        message: "Too many login attempts. Please try again later.",
+      },
+    });
+    expect(authService.loginUser).not.toHaveBeenCalled();
   });
 });

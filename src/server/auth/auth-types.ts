@@ -1,3 +1,5 @@
+import type { Prisma } from "@prisma/client";
+
 export type AuthUserRecord = {
   id: string;
   email: string;
@@ -33,12 +35,6 @@ export type CreateUserInput = {
   passwordHash: string;
 };
 
-export type CreateSessionInput = {
-  token: string;
-  userId: string;
-  expiresAt: Date;
-};
-
 export type EmailVerificationTokenRecord = {
   id: string;
   userId: string;
@@ -56,7 +52,7 @@ export type CreateSessionInput = {
   token: string;
   userId: string;
   expiresAt: Date;
-  deviceInfo?: unknown;
+  deviceInfo?: Prisma.InputJsonValue | Prisma.NullableJsonNullValueInput;
   ipAddress?: string | null;
 };
 

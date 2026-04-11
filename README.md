@@ -75,6 +75,7 @@ http://localhost:3000
 ```env
 APP_URL=
 DATABASE_URL=
+REDIS_URL=
 RESEND_API_KEY=
 RESEND_FROM_EMAIL=
 SILICONFLOW_API_KEY=
@@ -145,14 +146,16 @@ npm run build
 ```text
 Browser
 -> Nginx :80
--> Next.js :3000
+-> ai-chat container :3000
+-> redis container :6379 (internal only)
 -> Neon PostgreSQL
 ```
 
 服务器职责：
 
-- PM2 托管 `next start`
-- Nginx 反向代理到 3000 端口
+- Nginx 反向代理到 Docker 容器内的 3000 端口
+- Docker Compose 同机托管 `ai-chat` 和 `redis`
+- Redis 只走 Docker 内部网络，不开放公网 6379
 - 服务器本地 `.env.production` 保存真实生产环境变量
 
 仓库中的 `scripts/deploy.sh` 是标准部署脚本模板，线上建议放在：
@@ -224,6 +227,7 @@ CI 只使用安全占位值，不使用真实生产密钥。
 - 本地开发：自己创建 `.env.local`
 - 本地测试/演练：按需自己创建 `.env.test` / `.env.production`
 - 服务器运行时：维护 `/root/apps/ai-chat/.env.production`
+  - 至少包含 `APP_URL`、`DATABASE_URL`、`REDIS_URL`、`RESEND_*`、`SILICONFLOW_*`
 
 ## Testing and Verification
 

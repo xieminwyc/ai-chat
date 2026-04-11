@@ -45,6 +45,8 @@ import {
   getPasswordResetExpiresAt,
   hashPasswordResetToken,
 } from "@/server/auth/password-reset";
+import type { AuthSessionWithUser } from "@/server/auth/auth-types";
+import { getCacheService } from "@/server/cache/cache-service";
 import { createSessionToken, getSessionExpiresAt } from "@/server/auth/session";
 import type { DeviceInfo } from "@/server/auth/device-info";
 
@@ -64,6 +66,123 @@ type LoginUserInput = {
 function normalizeEmail(email: string) {
   // 统一邮箱格式，避免 Alice@example.com 和 alice@example.com 被当成两个账号。
   return email.trim().toLowerCase();
+}
+
+const SESSION_CACHE_TTL_SECONDS = 5 * 60;
+const SESSION_ACTIVITY_REFRESH_INTERVAL_MS = 5 * 60 * 1000;
+
+function getSessionCacheKey(sessionToken: string) {
+  return `auth:session:${sessionToken}`;
+}
+
+function toCachedSession(session: AuthSessionWithUser) {
+  // Redis 里统一放可序列化数据，避免 Date 被隐式处理后读回来不一致。
+  return {
+    ...session,
+    createdAt: session.createdAt.toISOString(),
+    expiresAt: session.expiresAt.toISOString(),
+    lastActiveAt: session.lastActiveAt.toISOString(),
+    user: {
+      ...session.user,
+      createdAt: session.user.createdAt.toISOString(),
+      emailVerifiedAt: session.user.emailVerifiedAt?.toISOString() ?? null,
+      updatedAt: session.user.updatedAt.toISOString(),
+    },
+  };
+}
+
+function parseDateValue(value: Date | string | null | undefined) {
+  if (value == null) {
+    return null;
+  }
+
+  if (value instanceof Date) {
+    return value;
+  }
+
+  const parsedDate = new Date(value);
+  return Number.isNaN(parsedDate.getTime()) ? null : parsedDate;
+}
+
+function fromCachedSession(
+  cachedSession: ReturnType<typeof toCachedSession> | AuthSessionWithUser | null,
+): AuthSessionWithUser | null {
+  if (!cachedSession) {
+    return null;
+  }
+
+  const createdAt = parseDateValue(cachedSession.createdAt);
+  const expiresAt = parseDateValue(cachedSession.expiresAt);
+  const lastActiveAt = parseDateValue(cachedSession.lastActiveAt);
+  const userCreatedAt = parseDateValue(cachedSession.user.createdAt);
+  const userUpdatedAt = parseDateValue(cachedSession.user.updatedAt);
+  const userEmailVerifiedAt = parseDateValue(cachedSession.user.emailVerifiedAt);
+
+  if (
+    !createdAt ||
+    !expiresAt ||
+    !lastActiveAt ||
+    !userCreatedAt ||
+    !userUpdatedAt
+  ) {
+    // 只要关键时间字段坏掉，就把这份缓存当无效，回数据库拿真数据。
+    return null;
+  }
+
+  return {
+    ...cachedSession,
+    createdAt,
+    expiresAt,
+    lastActiveAt,
+    user: {
+      ...cachedSession.user,
+      createdAt: userCreatedAt,
+      emailVerifiedAt: userEmailVerifiedAt,
+      updatedAt: userUpdatedAt,
+    },
+  };
+}
+
+async function writeSessionToCache(session: AuthSessionWithUser) {
+  await getCacheService().setJson(
+    getSessionCacheKey(session.token),
+    toCachedSession(session),
+    { ttlSeconds: SESSION_CACHE_TTL_SECONDS },
+  );
+}
+
+async function deleteSessionCache(sessionToken: string) {
+  await getCacheService().delete(getSessionCacheKey(sessionToken));
+}
+
+async function deleteSessionCachesForUser(userId: string) {
+  // 某些安全事件会影响一个用户的所有 session，只删单个 token 不够。
+  const sessions = await findSessionsByUserId(userId);
+
+  await Promise.all(
+    sessions.map((session) => deleteSessionCache(session.token)),
+  );
+}
+
+function scheduleSessionActivityRefresh(session: AuthSessionWithUser) {
+  const timeSinceLastActive = Date.now() - session.lastActiveAt.getTime();
+
+  if (timeSinceLastActive <= SESSION_ACTIVITY_REFRESH_INTERVAL_MS) {
+    return;
+  }
+
+  const refreshedSession = {
+    ...session,
+    lastActiveAt: new Date(),
+  };
+
+  // 数据库更新时间和缓存更新时间都异步做，避免每次恢复 session 都卡住主请求。
+  Promise.resolve(
+    updateSessionLastActiveAt(session.token, refreshedSession.lastActiveAt),
+  ).catch(() => {
+    // 静默失败，不影响主流程
+  });
+  void writeSessionToCache(refreshedSession);
 }
 
 async function issueEmailVerificationForUser(user: {
@@ -134,7 +253,7 @@ export async function loginUser({
   const sessionToken = createSessionToken();
   const expiresAt = getSessionExpiresAt();
 
-  await createSessionRecord({
+  const createdSession = await createSessionRecord({
     token: sessionToken,
     userId: user.id,
     expiresAt,
@@ -142,23 +261,31 @@ export async function loginUser({
     ipAddress,
   });
 
+  const safeUser = {
+    id: user.id,
+    email: user.email,
+    emailVerifiedAt: user.emailVerifiedAt,
+    createdAt: user.createdAt,
+    updatedAt: user.updatedAt,
+  };
+
+  await writeSessionToCache({
+    ...createdSession,
+    user: safeUser,
+  });
+
   return {
     sessionToken,
     expiresAt,
     // route handler 只需要把安全用户信息返回给前端。
-    user: {
-      id: user.id,
-      email: user.email,
-      emailVerifiedAt: user.emailVerifiedAt,
-      createdAt: user.createdAt,
-      updatedAt: user.updatedAt,
-    },
+    user: safeUser,
   };
 }
 
 export async function logoutUser(sessionToken: string) {
   // 退出登录的本质是让这个 session token 失效。
   await deleteSessionByToken(sessionToken);
+  await deleteSessionCache(sessionToken);
 }
 
 // The cookie only carries an opaque session token.
@@ -166,6 +293,24 @@ export async function logoutUser(sessionToken: string) {
 export async function getCurrentSession(sessionToken?: string | null) {
   if (!sessionToken) {
     return null;
+  }
+
+  // session 是高频读路径，先走缓存，miss 再回数据库。
+  const cachedSession = fromCachedSession(
+    await getCacheService().getJson<ReturnType<typeof toCachedSession>>(
+      getSessionCacheKey(sessionToken),
+    ),
+  );
+
+  if (cachedSession) {
+    if (cachedSession.expiresAt.getTime() <= Date.now()) {
+      await deleteSessionCache(sessionToken);
+      await deleteSessionByToken(sessionToken);
+      return null;
+    }
+
+    scheduleSessionActivityRefresh(cachedSession);
+    return cachedSession;
   }
 
   const session = await findSessionByToken(sessionToken);
@@ -177,20 +322,13 @@ export async function getCurrentSession(sessionToken?: string | null) {
   if (session.expiresAt.getTime() <= Date.now()) {
     // 过期 session 顺手清掉，避免旧 token 一直留在库里。
     await deleteSessionByToken(sessionToken);
+    await deleteSessionCache(sessionToken);
     return null;
   }
 
-  // 更新最后活跃时间（带节流机制，避免每次请求都写数据库）
-  // 只在距离上次活跃超过 5 分钟时才更新
-  const FIVE_MINUTES_MS = 5 * 60 * 1000;
-  const timeSinceLastActive = Date.now() - session.lastActiveAt.getTime();
-
-  if (timeSinceLastActive > FIVE_MINUTES_MS) {
-    // 异步更新，不阻塞请求
-    updateSessionLastActiveAt(sessionToken, new Date()).catch(() => {
-      // 静默失败，不影响主流程
-    });
-  }
+  // 只缓存已经确认有效的 session，避免把脏状态再次扩散出去。
+  await writeSessionToCache(session);
+  scheduleSessionActivityRefresh(session);
 
   return session;
 }
@@ -210,8 +348,12 @@ export async function verifyEmailToken(token: string) {
   const verifiedAt = new Date();
 
   await markEmailVerificationTokenUsed(verificationToken.id, verifiedAt);
+  const user = await markUserEmailVerified(verificationToken.userId, verifiedAt);
 
-  return markUserEmailVerified(verificationToken.userId, verifiedAt);
+  // 邮箱验证状态已经变了，旧 session cache 里的 user 摘要也要一起失效。
+  await deleteSessionCachesForUser(verificationToken.userId);
+
+  return user;
 }
 
 export async function resendVerificationEmailForUser(userId: string) {
@@ -261,6 +403,8 @@ export async function changePasswordForUser({
 
   const nextPasswordHash = await hashPassword(nextPassword);
   const updatedUser = await updateUserPasswordHash(userId, nextPasswordHash);
+  // 改密码后，当前用户的 cached session 里都还是旧安全状态，先全部失效。
+  await deleteSessionCachesForUser(userId);
 
   // 改密码后撤销所有其他 session，提升安全性
   if (currentSessionToken) {
@@ -322,6 +466,8 @@ export async function resetPasswordWithToken({
 
   await updateUserPasswordHash(resetToken.userId, nextPasswordHash);
   await markPasswordResetTokenUsed(resetToken.id, usedAt);
+  // 重置密码后所有登录态都不可信，先删缓存再删 session 记录。
+  await deleteSessionCachesForUser(resetToken.userId);
 
   // 密码重置后撤销该用户的所有 session，强制用户重新登录
   await deleteAllUserSessions(resetToken.userId);
@@ -359,6 +505,7 @@ export async function revokeSessionById(sessionId: string, userId: string) {
   }
 
   await deleteSessionById(sessionId);
+  await deleteSessionCache(session.token);
 }
 
 /**
@@ -371,6 +518,8 @@ export async function revokeAllOtherSessions(currentSessionToken: string) {
     throw new Error("Current session not found");
   }
 
+  // 这里宁可多删一次当前 token 的 cache，也不要留下别的设备旧状态。
+  await deleteSessionCachesForUser(currentSession.userId);
   await deleteAllUserSessionsExcept(currentSession.userId, currentSessionToken);
 }
 

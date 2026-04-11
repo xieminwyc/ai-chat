@@ -1,4 +1,21 @@
 services:
+  redis:
+    image: redis:alpine
+    # Redis 只给 ai-chat 容器走内部网络，不对公网暴露 6379。
+    restart: unless-stopped
+    command:
+      # 开启 AOF，至少把限流/缓存状态和未来可能扩展的轻量数据持久化到磁盘。
+      - redis-server
+      - --appendonly
+      - "yes"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
   ai-chat:
     # 线上镜像地址：CI 构建后推送到阿里云 ACR，服务器从这里 pull
     # 本地测试时可临时改成 ai-chat:local
@@ -11,6 +28,9 @@ services:
     env_file:
       # 从服务器本地的 .env.production 注入真实数据库密钥和 AI 密钥
       - .env.production
+    depends_on:
+      redis:
+        condition: service_healthy
     healthcheck:
       # 每隔一段时间请求这个接口，能通则认为应用健康
       test:
@@ -19,3 +39,6 @@ services:
       timeout: 10s # 超过 10 秒没响应算失败
       retries: 3 # 连续失败 3 次才标记为 unhealthy
       start_period: 10s # 启动后等 10 秒再开始检查（留时间给应用初始化）
+
+volumes:
+  redis-data:

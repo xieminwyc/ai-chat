@@ -44,7 +44,7 @@ const osPatterns: Array<[RegExp, string]> = [
 /**
  * 从 User-Agent 字符串中提取设备信息
  */
-export function parseDeviceInfo(userAgent: string): DeviceInfo {
+export function parseDeviceInfo(userAgent?: string): DeviceInfo {
   const ua = userAgent || "Unknown";
 
   // 检测设备类型

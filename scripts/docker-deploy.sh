@@ -46,6 +46,7 @@ set +a
 
 require_env_var "APP_URL"
 require_env_var "DATABASE_URL"
+require_env_var "REDIS_URL"
 require_env_var "RESEND_API_KEY"
 require_env_var "RESEND_FROM_EMAIL"
 require_env_var "SILICONFLOW_API_KEY"

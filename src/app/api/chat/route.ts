@@ -22,6 +22,8 @@ import {
   getGuestCookieOptions,
   readGuestTokenFromCookieHeader,
 } from "@/server/guest/guest-session";
+import { isAppErrorLike } from "@/server/shared/errors/app-error";
+import { enforceChatMessageRateLimit } from "@/server/rate-limit/rate-limit-policies";
 
 export const runtime = "nodejs";
 
@@ -171,6 +173,13 @@ function toRouteErrorResponse(
     return NextResponse.json(
       { error: error.message },
       { status: 403 },
+    );
+  }
+
+  if (isAppErrorLike(error)) {
+    return NextResponse.json(
+      { error: error.message },
+      { status: error.httpStatus },
     );
   }
 
@@ -331,6 +340,11 @@ export async function POST(request: Request) {
     logInfo("post.start", {
       chatId: requestedChatId ?? null,
       messageLength: message.length,
+    });
+
+    // 聊天频率保护放在真正生成回复前，避免模型和数据库资源先被打满。
+    await enforceChatMessageRateLimit({
+      actor: actor.owner,
     });
 
     const { chatId, isNewChat, replyStream } = await prepareChatReply({

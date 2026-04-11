@@ -29,17 +29,23 @@ const stream = vi.hoisted(() => ({
   createStreamingChatResponse: vi.fn(),
 }));
 
+const rateLimitPolicies = vi.hoisted(() => ({
+  enforceChatMessageRateLimit: vi.fn(),
+}));
+
 vi.mock("@/server/chat/chat-service", () => service);
 vi.mock("@/server/chat/chat-stream", () => stream);
 vi.mock("@/server/auth/auth-service", () => authService);
 vi.mock("@/server/guest/guest-service", () => guestService);
 vi.mock("@/server/guest/guest-session", () => guestSession);
+vi.mock("@/server/rate-limit/rate-limit-policies", () => rateLimitPolicies);
 
 import { DELETE, GET, PATCH, POST } from "@/app/api/chat/route";
 
 describe("/api/chat route", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    rateLimitPolicies.enforceChatMessageRateLimit.mockResolvedValue(undefined);
     service.listChatSummaries.mockResolvedValue([]);
     service.loadChatMessages.mockResolvedValue([]);
     service.prepareChatReply.mockReset();
@@ -226,6 +232,9 @@ describe("/api/chat route", () => {
       chatId: CHAT_ID,
       message: "继续学习数据库",
     });
+    expect(rateLimitPolicies.enforceChatMessageRateLimit).toHaveBeenCalledWith({
+      actor: { kind: "user", userId: "user_1" },
+    });
     expect(stream.createStreamingChatResponse).toHaveBeenCalledWith({
       chatId: CHAT_ID,
       replyStream: expect.any(Object),
@@ -268,6 +277,36 @@ describe("/api/chat route", () => {
     expect(response.status).toBe(403);
     expect(data).toEqual({
       error: "请先验证邮箱后再继续聊天。",
+    });
+    expect(service.prepareChatReply).not.toHaveBeenCalled();
+  });
+
+  it("returns 429 when the chat message rate limit has been exceeded", async () => {
+    rateLimitPolicies.enforceChatMessageRateLimit.mockRejectedValue(
+      Object.assign(new Error("发送太快，请稍后再试。"), {
+        code: "rate_limit.exceeded",
+        httpStatus: 429,
+        expose: true,
+      }),
+    );
+
+    const response = await POST(
+      new Request("http://localhost:3000/api/chat", {
+        method: "POST",
+        body: JSON.stringify({
+          message: "继续学习数据库",
+        }),
+        headers: {
+          "Content-Type": "application/json",
+          cookie: "ai-chat-session=session-token",
+        },
+      }),
+    );
+    const data = await response.json();
+
+    expect(response.status).toBe(429);
+    expect(data).toEqual({
+      error: "发送太快，请稍后再试。",
     });
     expect(service.prepareChatReply).not.toHaveBeenCalled();
   });

@@ -7,11 +7,14 @@ const repository = vi.hoisted(() => ({
   createUser: vi.fn(),
   deleteAllUserSessions: vi.fn(),
   deleteAllUserSessionsExcept: vi.fn(),
+  deleteSessionById: vi.fn(),
   deleteUnusedEmailVerificationTokensByUserId: vi.fn(),
   deleteUnusedPasswordResetTokensByUserId: vi.fn(),
+  findSessionById: vi.fn(),
   deleteSessionByToken: vi.fn(),
   findEmailVerificationTokenByHash: vi.fn(),
   findPasswordResetTokenByHash: vi.fn(),
+  findSessionsByUserId: vi.fn(),
   findSessionByToken: vi.fn(),
   findUserByEmail: vi.fn(),
   findUserById: vi.fn(),
@@ -46,7 +49,16 @@ const passwordReset = vi.hoisted(() => ({
   hashPasswordResetToken: vi.fn(),
 }));
 
+const cacheService = vi.hoisted(() => ({
+  delete: vi.fn(),
+  getJson: vi.fn(),
+  setJson: vi.fn(),
+}));
+
 vi.mock("@/server/auth/auth-repository", () => repository);
+vi.mock("@/server/cache/cache-service", () => ({
+  getCacheService: () => cacheService,
+}));
 vi.mock("@/server/auth/email-verification", () => emailVerification);
 vi.mock("@/server/auth/password", () => password);
 vi.mock("@/server/auth/password-reset", () => passwordReset);
@@ -67,6 +79,9 @@ import {
 describe("auth-service", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    cacheService.getJson.mockResolvedValue(null);
+    repository.findSessionsByUserId.mockResolvedValue([]);
+    repository.updateSessionLastActiveAt.mockResolvedValue(undefined);
   });
 
   it("rejects duplicate registration attempts", async () => {
@@ -211,11 +226,76 @@ describe("auth-service", () => {
     await logoutUser("session-token");
 
     expect(repository.deleteSessionByToken).toHaveBeenCalledWith("session-token");
+    expect(cacheService.delete).toHaveBeenCalledWith("auth:session:session-token");
   });
 
   it("returns null when there is no active session token", async () => {
     await expect(getCurrentSession(undefined)).resolves.toBeNull();
     expect(repository.findSessionByToken).not.toHaveBeenCalled();
+  });
+
+  it("returns a cached session before falling back to the repository", async () => {
+    const cachedSession = {
+      id: "session_1",
+      token: "session-token",
+      userId: "user_1",
+      expiresAt: new Date("2026-04-15T01:00:00.000Z"),
+      createdAt: new Date("2026-04-08T01:00:00.000Z"),
+      lastActiveAt: new Date("2026-04-08T01:00:00.000Z"),
+      deviceInfo: null,
+      ipAddress: null,
+      user: {
+        id: "user_1",
+        email: "alice@example.com",
+        emailVerifiedAt: new Date("2026-04-08T02:00:00.000Z"),
+        createdAt: new Date("2026-04-08T01:00:00.000Z"),
+        updatedAt: new Date("2026-04-08T01:00:00.000Z"),
+      },
+    };
+    cacheService.getJson.mockResolvedValue(cachedSession);
+
+    await expect(getCurrentSession("session-token")).resolves.toEqual(cachedSession);
+    expect(repository.findSessionByToken).not.toHaveBeenCalled();
+  });
+
+  it("stores the resolved session in cache after a database lookup", async () => {
+    const databaseSession = {
+      id: "session_1",
+      token: "session-token",
+      userId: "user_1",
+      expiresAt: new Date("2026-04-15T01:00:00.000Z"),
+      createdAt: new Date("2026-04-08T01:00:00.000Z"),
+      lastActiveAt: new Date("2026-04-08T01:00:00.000Z"),
+      deviceInfo: null,
+      ipAddress: null,
+      user: {
+        id: "user_1",
+        email: "alice@example.com",
+        emailVerifiedAt: new Date("2026-04-08T02:00:00.000Z"),
+        createdAt: new Date("2026-04-08T01:00:00.000Z"),
+        updatedAt: new Date("2026-04-08T01:00:00.000Z"),
+      },
+    };
+    repository.findSessionByToken.mockResolvedValue(databaseSession);
+
+    await expect(getCurrentSession("session-token")).resolves.toEqual(databaseSession);
+    expect(cacheService.setJson).toHaveBeenNthCalledWith(
+      1,
+      "auth:session:session-token",
+      {
+        ...databaseSession,
+        createdAt: "2026-04-08T01:00:00.000Z",
+        expiresAt: "2026-04-15T01:00:00.000Z",
+        lastActiveAt: "2026-04-08T01:00:00.000Z",
+        user: {
+          ...databaseSession.user,
+          createdAt: "2026-04-08T01:00:00.000Z",
+          emailVerifiedAt: "2026-04-08T02:00:00.000Z",
+          updatedAt: "2026-04-08T01:00:00.000Z",
+        },
+      },
+      { ttlSeconds: 300 },
+    );
   });
 
   it("rejects email verification when the token cannot be found", async () => {

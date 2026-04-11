@@ -8,6 +8,7 @@ import {
   getSessionCookieName,
   getSessionCookieOptions,
 } from "@/server/auth/session";
+import { enforceLoginRateLimit } from "@/server/rate-limit/rate-limit-policies";
 import { toErrorResponse } from "@/server/shared/errors/error-response";
 import { extractRequestInfo } from "@/server/auth/device-info";
 
@@ -15,6 +16,12 @@ export async function POST(request: Request) {
   try {
     const body = loginSchema.parse(await request.json());
     const { deviceInfo, ipAddress } = extractRequestInfo(request);
+
+    // 先挡掉明显的暴力尝试，再进入真正的密码校验和 session 创建。
+    await enforceLoginRateLimit({
+      email: body.email,
+      ipAddress,
+    });
 
     const result = await loginUser({
       ...body,
