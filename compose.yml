@@ -2,9 +2,6 @@ services:
   redis:
     image: redis:7-alpine
     # Redis 只给 ai-chat 容器走内部网络，不对公网暴露 6379。
-    # ⚠️ 临时暴露端口用于调试，用完记得删除 ports 配置
-    ports:
-      - "6379:6379"
     restart: unless-stopped
     command:
       # 开启 AOF，至少把限流/缓存状态和未来可能扩展的轻量数据持久化到磁盘。
