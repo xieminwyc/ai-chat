@@ -77,15 +77,24 @@ export async function findUserById(
 export async function createSessionRecord(
   data: CreateSessionInput,
 ): Promise<AuthSessionRecord> {
-  // session 记录是真正的“登录态来源”，cookie 只是带着 token 回来找它。
+  // session 记录是真正的”登录态来源”，cookie 只是带着 token 回来找它。
   return prisma.session.create({
-    data,
+    data: {
+      token: data.token,
+      userId: data.userId,
+      expiresAt: data.expiresAt,
+      deviceInfo: data.deviceInfo,
+      ipAddress: data.ipAddress,
+    },
     select: {
       id: true,
       token: true,
       userId: true,
       expiresAt: true,
       createdAt: true,
+      lastActiveAt: true,
+      deviceInfo: true,
+      ipAddress: true,
     },
   });
 }
@@ -102,6 +111,9 @@ export async function findSessionByToken(
       userId: true,
       expiresAt: true,
       createdAt: true,
+      lastActiveAt: true,
+      deviceInfo: true,
+      ipAddress: true,
       user: {
         select: authUserSummarySelect,
       },
@@ -221,5 +233,78 @@ export async function updateUserPasswordHash(
     where: { id },
     data: { passwordHash },
     select: authUserSummarySelect,
+  });
+}
+
+// Session 管理相关方法
+
+export async function findSessionsByUserId(
+  userId: string,
+): Promise<AuthSessionRecord[]> {
+  return prisma.session.findMany({
+    where: { userId },
+    select: {
+      id: true,
+      token: true,
+      userId: true,
+      expiresAt: true,
+      createdAt: true,
+      lastActiveAt: true,
+      deviceInfo: true,
+      ipAddress: true,
+    },
+    orderBy: { lastActiveAt: "desc" },
+  });
+}
+
+export async function findSessionById(
+  id: string,
+): Promise<AuthSessionRecord | null> {
+  return prisma.session.findUnique({
+    where: { id },
+    select: {
+      id: true,
+      token: true,
+      userId: true,
+      expiresAt: true,
+      createdAt: true,
+      lastActiveAt: true,
+      deviceInfo: true,
+      ipAddress: true,
+    },
+  });
+}
+
+export async function deleteSessionById(id: string) {
+  return prisma.session.delete({
+    where: { id },
+  });
+}
+
+export async function deleteAllUserSessionsExcept(
+  userId: string,
+  exceptToken: string,
+) {
+  return prisma.session.deleteMany({
+    where: {
+      userId,
+      token: { not: exceptToken },
+    },
+  });
+}
+
+export async function deleteAllUserSessions(userId: string) {
+  return prisma.session.deleteMany({
+    where: { userId },
+  });
+}
+
+export async function updateSessionLastActiveAt(
+  token: string,
+  lastActiveAt: Date,
+): Promise<void> {
+  await prisma.session.update({
+    where: { token },
+    data: { lastActiveAt },
   });
 }

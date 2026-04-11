@@ -23,6 +23,18 @@ vi.mock("@/server/auth/email-delivery", () => emailDelivery);
 
 import { POST } from "@/app/api/auth/register/route";
 
+function createRouteError(
+  code: string,
+  httpStatus: number,
+  message: string,
+) {
+  return Object.assign(new Error(message), {
+    code,
+    httpStatus,
+    expose: true,
+  });
+}
+
 describe("/api/auth/register route", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -86,7 +98,11 @@ describe("/api/auth/register route", () => {
       verificationUrl: "http://localhost:3000/verify-email?token=verify-token",
     });
     emailDelivery.sendVerificationEmail.mockRejectedValue(
-      new Error("RESEND_API_KEY is required to send verification emails."),
+      createRouteError(
+        "auth.email_delivery_failed",
+        500,
+        "Unable to send verification email",
+      ),
     );
 
     const response = await POST(
@@ -105,7 +121,42 @@ describe("/api/auth/register route", () => {
 
     expect(response.status).toBe(500);
     expect(data).toEqual({
-      error: "RESEND_API_KEY is required to send verification emails.",
+      error: {
+        code: "auth.email_delivery_failed",
+        message: "Unable to send verification email",
+      },
+    });
+  });
+
+  it("returns a typed conflict error when the email already exists", async () => {
+    authService.registerUser.mockRejectedValue(
+      createRouteError(
+        "auth.email_already_exists",
+        409,
+        "A user with this email already exists",
+      ),
+    );
+
+    const response = await POST(
+      new Request("http://localhost:3000/api/auth/register", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          email: "alice@example.com",
+          password: "super-secret-password",
+        }),
+      }),
+    );
+    const data = await response.json();
+
+    expect(response.status).toBe(409);
+    expect(data).toEqual({
+      error: {
+        code: "auth.email_already_exists",
+        message: "A user with this email already exists",
+      },
     });
   });
 });

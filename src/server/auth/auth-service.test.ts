@@ -5,6 +5,8 @@ const repository = vi.hoisted(() => ({
   createPasswordResetToken: vi.fn(),
   createSessionRecord: vi.fn(),
   createUser: vi.fn(),
+  deleteAllUserSessions: vi.fn(),
+  deleteAllUserSessionsExcept: vi.fn(),
   deleteUnusedEmailVerificationTokensByUserId: vi.fn(),
   deleteUnusedPasswordResetTokensByUserId: vi.fn(),
   deleteSessionByToken: vi.fn(),
@@ -16,6 +18,7 @@ const repository = vi.hoisted(() => ({
   markEmailVerificationTokenUsed: vi.fn(),
   markPasswordResetTokenUsed: vi.fn(),
   markUserEmailVerified: vi.fn(),
+  updateSessionLastActiveAt: vi.fn(),
   updateUserPasswordHash: vi.fn(),
 }));
 
@@ -81,7 +84,11 @@ describe("auth-service", () => {
         email: "alice@example.com",
         password: "super-secret-password",
       }),
-    ).rejects.toThrow("A user with this email already exists");
+    ).rejects.toMatchObject({
+      code: "auth.email_already_exists",
+      httpStatus: 409,
+      message: "A user with this email already exists",
+    });
   });
 
   it("hashes the password before creating a user", async () => {
@@ -154,19 +161,24 @@ describe("auth-service", () => {
         email: "alice@example.com",
         password: "wrong-password",
       }),
-    ).rejects.toThrow("Invalid email or password");
+    ).rejects.toMatchObject({
+      code: "auth.invalid_credentials",
+      httpStatus: 401,
+      message: "Invalid email or password",
+    });
   });
 
   it("creates a session token and session record on login", async () => {
     const expiresAt = new Date("2026-04-15T01:00:00.000Z");
+    const now = new Date("2026-04-08T01:00:00.000Z");
 
     repository.findUserByEmail.mockResolvedValue({
       id: "user_1",
       email: "alice@example.com",
       emailVerifiedAt: null,
       passwordHash: "hashed-password",
-      createdAt: new Date("2026-04-08T01:00:00.000Z"),
-      updatedAt: new Date("2026-04-08T01:00:00.000Z"),
+      createdAt: now,
+      updatedAt: now,
     });
     password.verifyPassword.mockResolvedValue(true);
     session.createSessionToken.mockReturnValue("session-token");
@@ -176,7 +188,10 @@ describe("auth-service", () => {
       token: "session-token",
       userId: "user_1",
       expiresAt,
-      createdAt: new Date("2026-04-08T01:00:00.000Z"),
+      createdAt: now,
+      lastActiveAt: now,
+      deviceInfo: null,
+      ipAddress: null,
     });
 
     const result = await loginUser({
@@ -207,9 +222,11 @@ describe("auth-service", () => {
     emailVerification.hashEmailVerificationToken.mockReturnValue("missing-hash");
     repository.findEmailVerificationTokenByHash.mockResolvedValue(null);
 
-    await expect(verifyEmailToken("missing-token")).rejects.toThrow(
-      "Verification link is invalid or has already been used",
-    );
+    await expect(verifyEmailToken("missing-token")).rejects.toMatchObject({
+      code: "auth.verification_token_invalid",
+      httpStatus: 400,
+      message: "Verification link is invalid or has already been used",
+    });
   });
 
   it("rejects email verification when the token is expired", async () => {
@@ -231,9 +248,11 @@ describe("auth-service", () => {
       },
     });
 
-    await expect(verifyEmailToken("expired-token")).rejects.toThrow(
-      "Verification link has expired",
-    );
+    await expect(verifyEmailToken("expired-token")).rejects.toMatchObject({
+      code: "auth.verification_token_expired",
+      httpStatus: 400,
+      message: "Verification link has expired",
+    });
   });
 
   it("marks the token used and verifies the user email", async () => {
@@ -333,6 +352,23 @@ describe("auth-service", () => {
     );
   });
 
+  it("rejects resend when the email is already verified", async () => {
+    repository.findUserById.mockResolvedValue({
+      id: "user_1",
+      email: "alice@example.com",
+      emailVerifiedAt: new Date("2026-04-08T02:00:00.000Z"),
+      passwordHash: "hashed-password",
+      createdAt: new Date("2026-04-07T00:00:00.000Z"),
+      updatedAt: new Date("2026-04-08T02:00:00.000Z"),
+    });
+
+    await expect(resendVerificationEmailForUser("user_1")).rejects.toMatchObject({
+      code: "auth.email_already_verified",
+      httpStatus: 400,
+      message: "Email is already verified",
+    });
+  });
+
   it("rejects password change when the current password is wrong", async () => {
     repository.findUserById.mockResolvedValue({
       id: "user_1",
@@ -350,7 +386,11 @@ describe("auth-service", () => {
         currentPassword: "wrong-password",
         nextPassword: "brand-new-password",
       }),
-    ).rejects.toThrow("Current password is incorrect");
+    ).rejects.toMatchObject({
+      code: "auth.current_password_incorrect",
+      httpStatus: 400,
+      message: "Current password is incorrect",
+    });
   });
 
   it("rejects password change when the next password matches the current password", async () => {
@@ -370,7 +410,11 @@ describe("auth-service", () => {
         currentPassword: "same-password",
         nextPassword: "same-password",
       }),
-    ).rejects.toThrow("New password must be different");
+    ).rejects.toMatchObject({
+      code: "auth.password_reuse",
+      httpStatus: 400,
+      message: "New password must be different",
+    });
   });
 
   it("hashes and updates the password when change succeeds", async () => {

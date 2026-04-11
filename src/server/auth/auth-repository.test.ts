@@ -133,20 +133,27 @@ describe("auth-repository", () => {
 
   it("creates and loads a session together with its user", async () => {
     const expiresAt = new Date("2026-04-15T01:00:00.000Z");
+    const now = new Date("2026-04-08T01:00:00.000Z");
 
     prisma.session.create.mockResolvedValue({
       id: "session_1",
       token: "session-token",
       userId: "user_1",
       expiresAt,
-      createdAt: new Date("2026-04-08T01:00:00.000Z"),
+      createdAt: now,
+      lastActiveAt: now,
+      deviceInfo: null,
+      ipAddress: null,
     });
     prisma.session.findUnique.mockResolvedValue({
       id: "session_1",
       token: "session-token",
       userId: "user_1",
       expiresAt,
-      createdAt: new Date("2026-04-08T01:00:00.000Z"),
+      createdAt: now,
+      lastActiveAt: now,
+      deviceInfo: null,
+      ipAddress: null,
       user: {
         id: "user_1",
         email: "alice@example.com",
@@ -167,6 +174,8 @@ describe("auth-repository", () => {
         token: "session-token",
         userId: "user_1",
         expiresAt,
+        deviceInfo: undefined,
+        ipAddress: undefined,
       },
       select: {
         id: true,
@@ -174,6 +183,9 @@ describe("auth-repository", () => {
         userId: true,
         expiresAt: true,
         createdAt: true,
+        lastActiveAt: true,
+        deviceInfo: true,
+        ipAddress: true,
       },
     });
     expect(prisma.session.findUnique).toHaveBeenCalledWith({
@@ -184,6 +196,9 @@ describe("auth-repository", () => {
         userId: true,
         expiresAt: true,
         createdAt: true,
+        lastActiveAt: true,
+        deviceInfo: true,
+        ipAddress: true,
         user: {
           select: {
             id: true,

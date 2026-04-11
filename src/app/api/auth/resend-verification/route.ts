@@ -1,24 +1,13 @@
 import { NextResponse } from "next/server";
 
-import {
-  isEmailDeliveryError,
-  sendVerificationEmail,
-} from "@/server/auth/email-delivery";
+import { UnauthorizedAuthError } from "@/server/auth/auth-errors";
+import { sendVerificationEmail } from "@/server/auth/email-delivery";
 import {
   getCurrentSession,
   resendVerificationEmailForUser,
 } from "@/server/auth/auth-service";
 import { readSessionTokenFromCookieHeader } from "@/server/auth/session";
-
-function isResendVerificationClientError(error: unknown): error is Error {
-  return (
-    error instanceof Error &&
-    [
-      "User not found",
-      "Email is already verified",
-    ].includes(error.message)
-  );
-}
+import { toErrorResponse } from "@/server/shared/errors/error-response";
 
 export async function POST(request: Request) {
   try {
@@ -28,7 +17,7 @@ export async function POST(request: Request) {
     const session = await getCurrentSession(sessionToken);
 
     if (!session) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+      return toErrorResponse(new UnauthorizedAuthError());
     }
 
     const delivery = await resendVerificationEmailForUser(session.user.id);
@@ -37,22 +26,8 @@ export async function POST(request: Request) {
 
     return NextResponse.json({ success: true }, { status: 202 });
   } catch (error) {
-    if (isResendVerificationClientError(error)) {
-      return NextResponse.json({ error: error.message }, { status: 400 });
-    }
-
-    if (isEmailDeliveryError(error)) {
-      return NextResponse.json({ error: error.message }, { status: 500 });
-    }
-
-    return NextResponse.json(
-      {
-        error:
-          error instanceof Error
-            ? error.message
-            : "Resend verification route failed",
-      },
-      { status: 500 },
-    );
+    return toErrorResponse(error, {
+      fallbackMessage: "Resend verification route failed",
+    });
   }
 }

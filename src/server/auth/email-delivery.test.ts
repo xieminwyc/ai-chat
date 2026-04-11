@@ -47,7 +47,11 @@ describe("email-delivery", () => {
         email: "alice@example.com",
         verificationUrl: "http://localhost:3000/verify-email?token=test",
       }),
-    ).rejects.toThrow("RESEND_API_KEY is required to send verification emails.");
+    ).rejects.toMatchObject({
+      code: "auth.email_delivery_failed",
+      httpStatus: 500,
+      message: "Unable to send verification email",
+    });
   });
 
   it("sends a verification email through Resend", async () => {

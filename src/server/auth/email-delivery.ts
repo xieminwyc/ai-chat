@@ -1,5 +1,7 @@
 import { Resend } from "resend";
 
+import { EmailDeliveryFailedError } from "@/server/auth/auth-errors";
+
 type SendVerificationEmailInput = {
   email: string;
   verificationUrl: string;
@@ -19,7 +21,7 @@ function getResendApiKey() {
   const apiKey = process.env.RESEND_API_KEY;
 
   if (!apiKey) {
-    throw new Error("RESEND_API_KEY is required to send verification emails.");
+    throw new EmailDeliveryFailedError();
   }
 
   return apiKey;
@@ -29,9 +31,7 @@ function getResendFromEmail() {
   const fromEmail = process.env.RESEND_FROM_EMAIL;
 
   if (!fromEmail) {
-    throw new Error(
-      "RESEND_FROM_EMAIL is required to send verification emails.",
-    );
+    throw new EmailDeliveryFailedError();
   }
 
   return fromEmail;
@@ -47,13 +47,14 @@ export function isEmailDeliveryConfigurationError(
 }
 
 export function isEmailDeliveryError(error: unknown): error is Error {
-  if (!(error instanceof Error)) {
-    return false;
-  }
-
   return (
-    resendConfigurationErrorMessages.includes(error.message) ||
-    error.message.startsWith("Failed to send verification email:")
+    error instanceof Error &&
+    (
+      error instanceof EmailDeliveryFailedError ||
+      resendConfigurationErrorMessages.includes(error.message) ||
+      error.message.startsWith("Failed to send verification email:") ||
+      error.message.startsWith("Failed to send password reset email:")
+    )
   );
 }
 
@@ -87,7 +88,7 @@ export async function sendVerificationEmail({
   });
 
   if (error) {
-    throw new Error(`Failed to send verification email: ${error.message}`);
+    throw new EmailDeliveryFailedError(undefined, error);
   }
 }
 
@@ -121,6 +122,9 @@ export async function sendPasswordResetEmail({
   });
 
   if (error) {
-    throw new Error(`Failed to send password reset email: ${error.message}`);
+    throw new EmailDeliveryFailedError(
+      "Unable to send password reset email",
+      error,
+    );
   }
 }

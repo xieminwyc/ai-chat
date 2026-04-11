@@ -94,10 +94,13 @@ describe("/settings page", () => {
       screen.getByText("Verified users can manage higher-trust settings here."),
     ).toBeInTheDocument();
     expect(
+      screen.getByRole("heading", { name: "登录设备管理" }),
+    ).toBeInTheDocument();
+    expect(
       screen.getByRole("heading", { name: "Password" }),
     ).toBeInTheDocument();
     expect(
-      screen.getByRole("heading", { name: "Security roadmap" }),
+      screen.getByRole("heading", { name: "更高信任操作" }),
     ).toBeInTheDocument();
   });
 });

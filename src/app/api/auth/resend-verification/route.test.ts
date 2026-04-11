@@ -29,6 +29,18 @@ vi.mock("@/server/auth/email-delivery", () => emailDelivery);
 
 import { POST } from "@/app/api/auth/resend-verification/route";
 
+function createRouteError(
+  code: string,
+  httpStatus: number,
+  message: string,
+) {
+  return Object.assign(new Error(message), {
+    code,
+    httpStatus,
+    expose: true,
+  });
+}
+
 describe("/api/auth/resend-verification route", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -98,7 +110,11 @@ describe("/api/auth/resend-verification route", () => {
       verificationUrl: "http://localhost:3000/verify-email?token=verify-token",
     });
     emailDelivery.sendVerificationEmail.mockRejectedValue(
-      new Error("RESEND_API_KEY is required to send verification emails."),
+      createRouteError(
+        "auth.email_delivery_failed",
+        500,
+        "Unable to send verification email",
+      ),
     );
 
     const response = await POST(
@@ -113,7 +129,52 @@ describe("/api/auth/resend-verification route", () => {
 
     expect(response.status).toBe(500);
     expect(data).toEqual({
-      error: "RESEND_API_KEY is required to send verification emails.",
+      error: {
+        code: "auth.email_delivery_failed",
+        message: "Unable to send verification email",
+      },
+    });
+  });
+
+  it("returns a typed client error when the email is already verified", async () => {
+    authService.getCurrentSession.mockResolvedValue({
+      id: "session_1",
+      token: "session-token",
+      userId: "user_1",
+      expiresAt: new Date("2026-04-15T01:00:00.000Z"),
+      createdAt: new Date("2026-04-08T01:00:00.000Z"),
+      user: {
+        id: "user_1",
+        email: "alice@example.com",
+        emailVerifiedAt: new Date("2026-04-08T02:00:00.000Z"),
+        createdAt: new Date("2026-04-08T01:00:00.000Z"),
+        updatedAt: new Date("2026-04-08T02:00:00.000Z"),
+      },
+    });
+    authService.resendVerificationEmailForUser.mockRejectedValue(
+      createRouteError(
+        "auth.email_already_verified",
+        400,
+        "Email is already verified",
+      ),
+    );
+
+    const response = await POST(
+      new Request("http://localhost:3000/api/auth/resend-verification", {
+        method: "POST",
+        headers: {
+          cookie: "ai-chat-session=session-token",
+        },
+      }),
+    );
+    const data = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(data).toEqual({
+      error: {
+        code: "auth.email_already_verified",
+        message: "Email is already verified",
+      },
     });
   });
 });

@@ -18,6 +18,10 @@ export type AuthSessionRecord = {
   userId: string;
   expiresAt: Date;
   createdAt: Date;
+  lastActiveAt: Date;
+  // 设备信息，包含 { userAgent, ip, deviceType, browser, os }
+  deviceInfo: unknown | null;
+  ipAddress: string | null;
 };
 
 export type AuthSessionWithUser = AuthSessionRecord & {
@@ -46,6 +50,14 @@ export type EmailVerificationTokenRecord = {
 
 export type EmailVerificationTokenWithUser = EmailVerificationTokenRecord & {
   user: AuthUserRecord;
+};
+
+export type CreateSessionInput = {
+  token: string;
+  userId: string;
+  expiresAt: Date;
+  deviceInfo?: unknown;
+  ipAddress?: string | null;
 };
 
 export type CreateEmailVerificationTokenInput = {

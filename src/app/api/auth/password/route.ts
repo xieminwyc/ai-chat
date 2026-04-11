@@ -1,20 +1,16 @@
 import { NextResponse } from "next/server";
 
 import {
+  InvalidAuthPayloadError,
+  UnauthorizedAuthError,
+} from "@/server/auth/auth-errors";
+import {
   changePasswordForUser,
   getCurrentSession,
 } from "@/server/auth/auth-service";
 import { changePasswordSchema } from "@/server/auth/auth-schemas";
 import { readSessionTokenFromCookieHeader } from "@/server/auth/session";
-
-function isChangePasswordClientError(error: unknown): error is Error {
-  return (
-    error instanceof Error &&
-    ["User not found", "Current password is incorrect", "New password must be different"].includes(
-      error.message,
-    )
-  );
-}
+import { toErrorResponse } from "@/server/shared/errors/error-response";
 
 export async function POST(request: Request) {
   const sessionToken = readSessionTokenFromCookieHeader(
@@ -23,14 +19,16 @@ export async function POST(request: Request) {
   const session = await getCurrentSession(sessionToken);
 
   if (!session) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    return toErrorResponse(new UnauthorizedAuthError());
   }
 
   const rawBody = (await request.json()) as unknown;
   const parsed = changePasswordSchema.safeParse(rawBody);
 
   if (!parsed.success) {
-    return NextResponse.json({ error: "Invalid password change payload" }, { status: 400 });
+    return toErrorResponse(
+      new InvalidAuthPayloadError("Invalid password change payload"),
+    );
   }
 
   try {
@@ -38,22 +36,13 @@ export async function POST(request: Request) {
       userId: session.user.id,
       currentPassword: parsed.data.currentPassword,
       nextPassword: parsed.data.nextPassword,
+      currentSessionToken: sessionToken ?? undefined,
     });
 
     return NextResponse.json({ success: true }, { status: 200 });
   } catch (error) {
-    if (isChangePasswordClientError(error)) {
-      return NextResponse.json({ error: error.message }, { status: 400 });
-    }
-
-    return NextResponse.json(
-      {
-        error:
-          error instanceof Error
-            ? error.message
-            : "Change password route failed",
-      },
-      { status: 500 },
-    );
+    return toErrorResponse(error, {
+      fallbackMessage: "Change password route failed",
+    });
   }
 }
