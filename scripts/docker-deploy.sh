@@ -7,6 +7,7 @@ set -euo pipefail
 PROJECT_DIR="/root/apps/ai-chat"
 COMPOSE_FILE="$PROJECT_DIR/compose.yml"
 ENV_FILE="$PROJECT_DIR/.env.production"
+APP_IMAGE="crpi-y387mtxqhofw4ibe.cn-guangzhou.personal.cr.aliyuncs.com/xieminwyc/ai-chat:latest"
 HEALTHCHECK_URL="http://localhost:3000"
 HEALTH_RETRIES=10
 HEALTH_INTERVAL=5
@@ -53,15 +54,6 @@ require_env_var "SILICONFLOW_API_KEY"
 require_env_var "SILICONFLOW_BASE_URL"
 require_env_var "SILICONFLOW_MODEL"
 
-# ── 4.1 使用临时容器执行 Prisma migration ────────────────────
-# 使用容器运行 migration，避免宿主机网络问题
-log "running prisma migrations using container..."
-docker run --rm \
-  --network ai-chat_default \
-  --env-file "$ENV_FILE" \
-  crpi-y387mtxqhofw4ibe.cn-guangzhou.personal.cr.aliyuncs.com/xieminwyc/ai-chat:latest \
-  node node_modules/prisma/build/index.js migrate deploy
-
 # ── 4. 登录阿里云 ACR ──────────────────────────────────────────
 # ACR_PASSWORD 需要提前在服务器 ~/.bashrc 或 /etc/environment 里配置：
 #   export ACR_PASSWORD=<阿里云容器镜像服务密码>
@@ -77,11 +69,20 @@ fi
 log "pulling latest image..."
 docker compose -f "$COMPOSE_FILE" pull
 
-# ── 6. 重启应用容器（使用新拉取的镜像）─────────────────────
+# ── 6. 使用刚拉取的镜像执行 Prisma migration ────────────────
+# 使用容器运行 migration，避免宿主机网络问题，同时确保 schema 与部署镜像一致
+log "running prisma migrations using container..."
+docker run --rm \
+  --network ai-chat_default \
+  --env-file "$ENV_FILE" \
+  "$APP_IMAGE" \
+  node node_modules/prisma/build/index.js migrate deploy
+
+# ── 7. 重启应用容器（使用新拉取的镜像）─────────────────────
 log "starting containers..."
 docker compose -f "$COMPOSE_FILE" up -d
 
-# ── 7. 健康检查 ─────────────────────────────────────────────
+# ── 8. 健康检查 ─────────────────────────────────────────────
 log "waiting for app to be healthy..."
 for i in $(seq 1 $HEALTH_RETRIES); do
   if curl -sf "$HEALTHCHECK_URL" > /dev/null 2>&1; then
@@ -96,7 +97,7 @@ for i in $(seq 1 $HEALTH_RETRIES); do
   sleep "$HEALTH_INTERVAL"
 done
 
-# ── 8. 清理旧镜像（避免磁盘空间被历史镜像撑满）────────────
+# ── 9. 清理旧镜像（避免磁盘空间被历史镜像撑满）────────────
 log "cleaning up dangling images..."
 docker image prune -f
 

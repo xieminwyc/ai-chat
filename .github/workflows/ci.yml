@@ -47,6 +47,12 @@ jobs:
       - name: Run tests
         run: npm run test
 
+      # 最后跑部署脚本回归检查，避免把明显错误的 deploy 逻辑合进 main。
+      - name: Run deploy regression checks
+        run: |
+          bash scripts/deploy-git-path-changed.test.sh
+          bash scripts/docker-deploy-runtime-regression.test.sh
+
   build-and-push:
     # lint/test 全部通过后才构建镜像，避免推出有问题的镜像。
     needs: verify
