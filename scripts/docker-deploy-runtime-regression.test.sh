@@ -6,6 +6,7 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DEPLOY_SCRIPT_PATH="${ROOT_DIR}/scripts/docker-deploy.sh"
 DEPLOY_WORKFLOW_PATH="${ROOT_DIR}/.github/workflows/deploy.yml"
 DOCKERFILE_PATH="${ROOT_DIR}/Dockerfile"
+PRISMA_CONFIG_PATH="${ROOT_DIR}/prisma.config.ts"
 
 assert_contains() {
   local file_path="$1"
@@ -13,6 +14,16 @@ assert_contains() {
 
   if ! grep -Fq "$expected" "$file_path"; then
     echo "expected to find '${expected}' in ${file_path}"
+    exit 1
+  fi
+}
+
+assert_not_contains() {
+  local file_path="$1"
+  local unexpected="$2"
+
+  if grep -Fq "$unexpected" "$file_path"; then
+    echo "expected not to find '${unexpected}' in ${file_path}"
     exit 1
   fi
 }
@@ -56,6 +67,7 @@ assert_occurs_before "${DEPLOY_SCRIPT_PATH}" 'docker compose -f "$COMPOSE_FILE" 
 assert_contains "${DEPLOY_SCRIPT_PATH}" 'require_env_var "RESEND_API_KEY"'
 assert_contains "${DEPLOY_SCRIPT_PATH}" 'require_env_var "RESEND_FROM_EMAIL"'
 assert_contains "${DOCKERFILE_PATH}" 'COPY --from=builder --chown=nextjs:nodejs /app/node_modules ./node_modules'
+assert_not_contains "${PRISMA_CONFIG_PATH}" '"./src/'
 
 assert_contains "${DEPLOY_WORKFLOW_PATH}" 'ref: ${{ github.event.workflow_run.head_sha }}'
 
