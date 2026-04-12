@@ -73,19 +73,13 @@ docker compose -f "$COMPOSE_FILE" pull
 # 使用容器运行 migration，避免宿主机网络问题，同时确保 schema 与部署镜像一致
 # 注意：使用 -e 传递已加载的环境变量，而不是 --env-file
 # 因为 --env-file 会把引号当作值的一部分，导致 DATABASE_URL 解析失败
+# 使用 --schema 直接指定 schema 文件，绕过 prisma.config.ts 的环境加载逻辑
 log "running prisma migrations using container..."
 docker run --rm \
   --network ai-chat_default \
   -e DATABASE_URL \
-  -e REDIS_URL \
-  -e APP_URL \
-  -e RESEND_API_KEY \
-  -e RESEND_FROM_EMAIL \
-  -e SILICONFLOW_API_KEY \
-  -e SILICONFLOW_BASE_URL \
-  -e SILICONFLOW_MODEL \
   "$APP_IMAGE" \
-  node node_modules/prisma/build/index.js migrate deploy
+  node node_modules/prisma/build/index.js migrate deploy --schema prisma/schema.prisma
 
 # ── 7. 重启应用容器（使用新拉取的镜像）─────────────────────
 log "starting containers..."
