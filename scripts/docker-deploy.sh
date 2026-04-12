@@ -60,7 +60,7 @@ docker run --rm \
   --network ai-chat_default \
   --env-file "$ENV_FILE" \
   crpi-y387mtxqhofw4ibe.cn-guangzhou.personal.cr.aliyuncs.com/xieminwyc/ai-chat:latest \
-  npx prisma migrate deploy
+  node node_modules/prisma/build/index.js migrate deploy
 
 # ── 4. 登录阿里云 ACR ──────────────────────────────────────────
 # ACR_PASSWORD 需要提前在服务器 ~/.bashrc 或 /etc/environment 里配置：
