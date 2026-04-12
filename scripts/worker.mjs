@@ -7,8 +7,9 @@
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import process from "node:process";
+import { spawn } from "node:child_process";
+import { pathToFileURL } from "node:url";
 import dotenv from "dotenv";
-import { execute } from "tsx";
 
 // 设置环境变量
 process.env.APP_ENV = "production";
@@ -59,12 +60,92 @@ function loadSelectedEnv({
   };
 }
 
-// 加载环境
-const result = loadSelectedEnv();
-console.log(
-  `[env-loader] using ${result.envFileName} (APP_ENV=${result.appEnv})`,
-);
+export function getWorkerRuntimeCommand({
+  cwd = process.cwd(),
+  execPath = process.execPath,
+} = {}) {
+  return {
+    command: execPath,
+    args: ["--import", "tsx", path.resolve(cwd, "scripts/worker.ts")],
+  };
+}
 
-// 动态导入并运行 TypeScript worker
-const workerPath = path.resolve(process.cwd(), "scripts/worker.ts");
-execute(workerPath);
+export async function runWorkerProcess({
+  cwd = process.cwd(),
+  execPath = process.execPath,
+  processEnv = process.env,
+} = {}) {
+  const runtime = getWorkerRuntimeCommand({ cwd, execPath });
+
+  await new Promise((resolve, reject) => {
+    const child = spawn(runtime.command, runtime.args, {
+      cwd,
+      env: processEnv,
+      stdio: "inherit",
+    });
+
+    const forwardSignal = (signal) => {
+      if (!child.killed) {
+        child.kill(signal);
+      }
+    };
+
+    process.once("SIGINT", forwardSignal);
+    process.once("SIGTERM", forwardSignal);
+
+    child.once("error", (error) => {
+      reject(error);
+    });
+
+    child.once("exit", (code, signal) => {
+      process.removeListener("SIGINT", forwardSignal);
+      process.removeListener("SIGTERM", forwardSignal);
+
+      if (signal) {
+        process.kill(process.pid, signal);
+        return;
+      }
+
+      if (code === 0) {
+        resolve(undefined);
+        return;
+      }
+
+      reject(new Error(`Worker process exited with code ${code ?? "unknown"}`));
+    });
+  });
+}
+
+export async function main({
+  appEnv = process.env.APP_ENV,
+  cwd = process.cwd(),
+  execPath = process.execPath,
+  processEnv = process.env,
+} = {}) {
+  const result = loadSelectedEnv({
+    appEnv,
+    cwd,
+    processEnv,
+  });
+
+  console.log(
+    `[env-loader] using ${result.envFileName} (APP_ENV=${result.appEnv})`,
+  );
+
+  await runWorkerProcess({
+    cwd,
+    execPath,
+    processEnv,
+  });
+}
+
+const isEntrypoint =
+  process.argv[1] &&
+  pathToFileURL(path.resolve(process.argv[1])).href === import.meta.url;
+
+if (isEntrypoint) {
+  main().catch((error) => {
+    console.error("[worker.mjs] Failed to start worker:", error);
+    process.exit(1);
+  });
+}
