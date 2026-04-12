@@ -12,6 +12,8 @@ export default defineConfig({
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "./src"),
+      // Mock server-only 模块（Next.js 特有，测试环境中不需要）
+      "server-only": path.resolve(__dirname, "./vitest.mocks/server-only.ts"),
     },
   },
 });
