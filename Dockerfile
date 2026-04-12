@@ -87,6 +87,7 @@ COPY --from=builder --chown=nextjs:nodejs /app/node_modules/ioredis ./node_modul
 COPY --from=builder --chown=nextjs:nodejs /app/node_modules/resend ./node_modules/resend
 COPY --from=builder --chown=nextjs:nodejs /app/node_modules/zod ./node_modules/zod
 COPY --from=builder --chown=nextjs:nodejs /app/node_modules/dotenv ./node_modules/dotenv
+COPY --from=builder --chown=nextjs:nodejs /app/node_modules/get-tsconfig ./node_modules/get-tsconfig
 COPY --from=builder --chown=nextjs:nodejs /app/node_modules/tsx ./node_modules/tsx
 # Worker 脚本和源码
 COPY --from=builder --chown=nextjs:nodejs /app/scripts/worker.ts ./scripts/worker.ts
