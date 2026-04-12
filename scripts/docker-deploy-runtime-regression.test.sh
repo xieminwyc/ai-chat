@@ -67,6 +67,8 @@ assert_occurs_before "${DEPLOY_SCRIPT_PATH}" 'docker compose -f "$COMPOSE_FILE" 
 assert_contains "${DEPLOY_SCRIPT_PATH}" 'require_env_var "RESEND_API_KEY"'
 assert_contains "${DEPLOY_SCRIPT_PATH}" 'require_env_var "RESEND_FROM_EMAIL"'
 assert_contains "${DOCKERFILE_PATH}" 'COPY --from=builder --chown=nextjs:nodejs /app/node_modules ./node_modules'
+assert_contains "${DOCKERFILE_PATH}" 'COPY --from=builder --chown=nextjs:nodejs /app/tsconfig.json ./tsconfig.json'
+assert_contains "${DOCKERFILE_PATH}" 'COPY --from=builder --chown=nextjs:nodejs /app/src/lib ./src/lib'
 assert_not_contains "${PRISMA_CONFIG_PATH}" '"./src/'
 
 assert_contains "${DEPLOY_WORKFLOW_PATH}" 'ref: ${{ github.event.workflow_run.head_sha }}'

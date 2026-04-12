@@ -71,11 +71,13 @@ COPY --from=builder --chown=nextjs:nodejs /app/node_modules ./node_modules
 # prisma schema + migration 文件（docker-deploy.sh 用临时容器跑 migrate 时需要）
 COPY --from=builder --chown=nextjs:nodejs /app/prisma ./prisma
 COPY --from=builder --chown=nextjs:nodejs /app/prisma.config.ts ./prisma.config.ts
+COPY --from=builder --chown=nextjs:nodejs /app/tsconfig.json ./tsconfig.json
 COPY --from=builder --chown=nextjs:nodejs /app/scripts/env.mjs ./scripts/env.mjs
 COPY --from=builder --chown=nextjs:nodejs /app/scripts/worker.mjs ./scripts/worker.mjs
 
 # Worker 脚本和源码
 COPY --from=builder --chown=nextjs:nodejs /app/scripts/worker.ts ./scripts/worker.ts
+COPY --from=builder --chown=nextjs:nodejs /app/src/lib ./src/lib
 COPY --from=builder --chown=nextjs:nodejs /app/src/server/queue ./src/server/queue
 COPY --from=builder --chown=nextjs:nodejs /app/src/server/auth/email-delivery.ts ./src/server/auth/email-delivery.ts
 COPY --from=builder --chown=nextjs:nodejs /app/src/server/auth/auth-errors.ts ./src/server/auth/auth-errors.ts
