@@ -2,7 +2,7 @@ import Redis from "ioredis";
 
 type RedisEnv = Record<string, string | undefined>;
 
-export type RedisClientLike = Pick<Redis, "del" | "exists" | "get" | "set"> & {
+export type RedisClientLike = Pick<Redis, "del" | "exists" | "get" | "set" | "lpush" | "brpop" | "llen"> & {
   disconnect?: () => void;
   on?: (event: string, listener: (...args: unknown[]) => void) => void;
 };
@@ -52,13 +52,26 @@ export function createRedisClient(env: RedisEnv = process.env) {
 
   const client = new Redis(connectionUrl, {
     enableOfflineQueue: false,
-    lazyConnect: true,
     maxRetriesPerRequest: 1,
+    // 增加重连延迟，给 Worker 更多时间启动
+    retryStrategy(times) {
+      if (times > 3) {
+        return null;
+      }
+      return Math.min(times * 100, 2000);
+    },
   });
 
   client.on?.("error", () => {
     // Redis 在本项目里是增强层，不应该因为连接抖动把主流程打断。
   });
+
+  // 等待连接就绪
+  if (client.connect) {
+    client.connect().catch(() => {
+      // 连接失败忽略，会在使用时重试
+    });
+  }
 
   return client;
 }

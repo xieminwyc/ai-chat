@@ -448,3 +448,101 @@
 - 如果继续做产品功能，下一步可给 `/settings` 增加更真实的安全项，例如设备管理或更高信任确认动作
 - 如果继续走学习主线，优先复盘 auth boundary、状态一致性和请求链路三块后端难点
 - 若想让仓库更干净，可先处理 `src/server/chat/chat-auth.test.ts` 的旧 lint warning 和那份学习文档里的手动误改
+
+---
+
+## Session: 2026-04-11 (Database Transactions & Cursor Pagination)
+
+### Phase 1: Transaction Infrastructure
+- **Status:** complete
+- Actions taken:
+  - 创建 `withTransaction` 工具函数，封装 Prisma 事务 API
+  - 创建 `withRetryableTransaction` 支持死锁重试
+  - 编写单元测试，验证事务提交、回滚和超时配置
+- Files created/modified:
+  - `src/server/shared/database/transaction.ts` (created)
+  - `src/server/shared/database/transaction.test.ts` (created)
+
+### Phase 2: Password Change with Transactions
+- **Status:** complete
+- Actions taken:
+  - 重构 `changePasswordForUser` 使用事务，确保密码更新和 Session 撤销原子性
+  - 重构 `resetPasswordWithToken` 使用事务
+  - 更新测试 mock，支持 `prisma.$transaction` 验证
+- Files created/modified:
+  - `src/server/auth/auth-service.ts` (updated)
+  - `src/server/auth/auth-service.test.ts` (updated)
+
+### Phase 3: Cursor Pagination Infrastructure
+- **Status:** complete
+- Actions taken:
+  - 创建游标编码/解码工具（base64url 格式）
+  - 创建分页类型定义（PaginatedResult、CursorPaginationParams）
+  - 创建分页 helper 函数（buildPaginationParams、processPaginationResult）
+  - 编写完整测试覆盖（25 个测试通过）
+- Files created/modified:
+  - `src/server/shared/pagination/pagination-types.ts` (created)
+  - `src/server/shared/pagination/cursor.ts` (created)
+  - `src/server/shared/pagination/cursor.test.ts` (created)
+  - `src/server/shared/pagination/pagination.ts` (created)
+  - `src/server/shared/pagination/pagination.test.ts` (created)
+
+### Phase 4: Chat List with Cursor Pagination
+- **Status:** complete
+- Actions taken:
+  - 在 chat-repository 中新增 `listChatsPaginated` 函数
+  - 使用复合排序键（updatedAt DESC + id DESC）
+  - 编写分页测试，验证游标传递和边界处理
+- Files created/modified:
+  - `src/server/chat/chat-repository.ts` (updated)
+  - `src/server/chat/chat-repository.pagination.test.ts` (created)
+
+### Phase 5: Verification & Documentation
+- **Status:** complete
+- Actions taken:
+  - 运行全部测试：271 个测试全部通过
+  - 更新学习笔记，添加实现总结与经验
+  - 记录关键决策和后续改进方向
+- Files created/modified:
+  - `docs/superpowers/specs/2026-04-11-database-transactions-pagination-learning.md` (updated)
+  - `progress.md` (updated)
+
+### 实现总结
+
+**新增文件** (7个):
+- `src/server/shared/database/transaction.ts` - 事务工具函数
+- `src/server/shared/database/transaction.test.ts` - 事务测试
+- `src/server/shared/pagination/pagination-types.ts` - 分页类型
+- `src/server/shared/pagination/cursor.ts` - 游标编码/解码
+- `src/server/shared/pagination/cursor.test.ts` - 游标测试
+- `src/server/shared/pagination/pagination.ts` - 分页 helper
+- `src/server/shared/pagination/pagination.test.ts` - 分页测试
+- `src/server/chat/chat-repository.pagination.test.ts` - API 分页测试
+
+**修改文件** (3个):
+- `src/server/auth/auth-service.ts` - 改密码使用事务
+- `src/server/auth/auth-service.test.ts` - 更新测试 mock
+- `src/server/chat/chat-repository.ts` - 新增分页函数
+
+**测试覆盖**:
+- 事务: 4 个单元测试
+- 游标: 21 个测试
+- 分页: 14 个测试
+- Chat 分页: 5 个测试
+- **总计: 271 个测试全部通过**
+
+### Next Steps
+
+**前端实现**（可选）:
+- 创建 `useInfiniteScroll` hook
+- 更新 ChatList 组件支持无限滚动
+- 添加 Intersection Observer API
+
+**性能优化**:
+- 添加数据库索引（updatedAt + id 复合索引）
+- 监控慢查询
+- 添加性能日志
+
+**Repository 层改进**:
+- 支持事务客户端参数
+- 复用代码在事务内外

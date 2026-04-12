@@ -69,10 +69,31 @@ COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
 COPY --from=builder --chown=nextjs:nodejs /app/node_modules/.prisma ./node_modules/.prisma
 COPY --from=builder --chown=nextjs:nodejs /app/node_modules/@prisma ./node_modules/@prisma
 COPY --from=builder --chown=nextjs:nodejs /app/node_modules/prisma ./node_modules/prisma
+
 # prisma schema + migration 文件（docker-deploy.sh 用临时容器跑 migrate 时需要）
 COPY --from=builder --chown=nextjs:nodejs /app/prisma ./prisma
 COPY --from=builder --chown=nextjs:nodejs /app/prisma.config.ts ./prisma.config.ts
 COPY --from=builder --chown=nextjs:nodejs /app/scripts/env.mjs ./scripts/env.mjs
+COPY --from=builder --chown=nextjs:nodejs /app/scripts/worker.mjs ./scripts/worker.mjs
+
+# Worker 需要的运行时依赖
+COPY --from=builder --chown=nextjs:nodejs /app/node_modules/.prisma ./node_modules/.prisma
+COPY --from=builder --chown=nextjs:nodejs /app/node_modules/@prisma ./node_modules/@prisma
+COPY --from=builder --chown=nextjs:nodejs /app/node_modules/prisma ./node_modules/prisma
+COPY --from=builder --chown=nextjs:nodejs /app/node_modules/pg ./node_modules/pg
+COPY --from=builder --chown=nextjs:nodejs /app/node_modules/bcryptjs ./node_modules/bcryptjs
+COPY --from=builder --chown=nextjs:nodejs /app/node_modules/dayjs ./node_modules/dayjs
+COPY --from=builder --chown=nextjs:nodejs /app/node_modules/ioredis ./node_modules/ioredis
+COPY --from=builder --chown=nextjs:nodejs /app/node_modules/resend ./node_modules/resend
+COPY --from=builder --chown=nextjs:nodejs /app/node_modules/zod ./node_modules/zod
+COPY --from=builder --chown=nextjs:nodejs /app/node_modules/dotenv ./node_modules/dotenv
+COPY --from=builder --chown=nextjs:nodejs /app/node_modules/tsx ./node_modules/tsx
+# Worker 脚本和源码
+COPY --from=builder --chown=nextjs:nodejs /app/scripts/worker.ts ./scripts/worker.ts
+COPY --from=builder --chown=nextjs:nodejs /app/src/server/queue ./src/server/queue
+COPY --from=builder --chown=nextjs:nodejs /app/src/server/auth/email-delivery.ts ./src/server/auth/email-delivery.ts
+COPY --from=builder --chown=nextjs:nodejs /app/src/server/auth/auth-errors.ts ./src/server/auth/auth-errors.ts
+COPY --from=builder --chown=nextjs:nodejs /app/src/server/shared/errors ./src/server/shared/errors
 
 # 切换到普通用户（之后的命令和容器启动都以这个用户身份运行）
 USER nextjs

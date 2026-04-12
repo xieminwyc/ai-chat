@@ -346,7 +346,7 @@ describe("ChatApp", () => {
         );
       }
 
-      if (url === "/api/chat") {
+      if (url.startsWith("/api/chat") && !url.includes("chatId")) {
         chatListRequestCount += 1;
 
         return Promise.resolve({
@@ -402,7 +402,7 @@ describe("ChatApp", () => {
         );
       }
 
-      if (url === "/api/chat") {
+      if (url.startsWith("/api/chat") && !url.includes("chatId")) {
         return Promise.resolve({
           ok: true,
           json: async () => ({
@@ -609,7 +609,7 @@ describe("ChatApp", () => {
 
     expect(
       await screen.findByText(
-        "邮箱或密码不正确。如果你还没注册，可以先切到“注册”创建账号。",
+        "邮箱或密码不正确。如果你还没注册，可以先切到「注册」创建账号。",
       ),
     ).toBeInTheDocument();
     expect(screen.getByLabelText("邮箱")).toHaveAttribute("aria-invalid", "true");
@@ -646,7 +646,7 @@ describe("ChatApp", () => {
 
     expect(
       await screen.findByText(
-        "邮箱或密码不正确。如果你还没注册，可以先切到“注册”创建账号。",
+        "邮箱或密码不正确。如果你还没注册，可以先切到「注册」创建账号。",
       ),
     ).toBeInTheDocument();
   });
@@ -681,7 +681,9 @@ describe("ChatApp", () => {
     await user.click(screen.getByRole("button", { name: "注册账号" }));
 
     expect(
-      await screen.findByText("这个邮箱已经注册过了，可以直接切到“登录”。"),
+      await screen.findByText(
+        "这个邮箱已经注册过了，可以直接切到「登录」。",
+      ),
     ).toBeInTheDocument();
   });
 
@@ -904,7 +906,7 @@ describe("ChatApp", () => {
         );
       }
 
-      if (url === "/api/chat") {
+      if (url.startsWith("/api/chat") && !url.includes("chatId")) {
         chatListRequestCount += 1;
 
         return Promise.resolve({
@@ -1138,12 +1140,21 @@ describe("ChatApp", () => {
     const user = userEvent.setup();
     window.localStorage.setItem("activeChatId", "chat_1");
 
-    vi.spyOn(global, "fetch").mockResolvedValue({
-      ok: true,
-      json: async () => ({
-        success: true,
-      }),
-    } as Response);
+    vi.spyOn(global, "fetch").mockImplementation((input, init) => {
+      const url = String(input);
+      // DELETE 请求返回成功
+      if (init?.method === "DELETE") {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({ success: true }),
+        } as Response);
+      }
+      // GET 请求返回空聊天列表（用于 reloadChats）
+      return Promise.resolve({
+        ok: true,
+        json: async () => ({ chats: [], nextCursor: null, hasMore: false }),
+      } as Response);
+    });
 
     render(
       <ChatApp
@@ -1191,7 +1202,7 @@ describe("ChatApp", () => {
         } as Response);
       }
 
-      if (url === "/api/chat") {
+      if (url.startsWith("/api/chat") && !url.includes("chatId")) {
         chatListRequestCount += 1;
 
         return Promise.resolve({

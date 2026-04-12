@@ -1,7 +1,10 @@
 services:
   redis:
     image: redis:7-alpine
-    # Redis 只给 ai-chat 容器走内部网络，不对公网暴露 6379。
+    # Redis 只给内部网络使用，不对公网暴露 6379
+    # 本地开发时可以取消下面的 ports 注释来连接
+    # ports:
+    #   - "6379:6379"
     restart: unless-stopped
     command:
       # 开启 AOF，至少把限流/缓存状态和未来可能扩展的轻量数据持久化到磁盘。
@@ -28,6 +31,8 @@ services:
     env_file:
       # 从服务器本地的 .env.production 注入真实数据库密钥和 AI 密钥
       - .env.production
+    environment:
+      - NODE_ENV=production
     depends_on:
       redis:
         condition: service_healthy
@@ -39,6 +44,20 @@ services:
       timeout: 10s # 超过 10 秒没响应算失败
       retries: 3 # 连续失败 3 次才标记为 unhealthy
       start_period: 10s # 启动后等 10 秒再开始检查（留时间给应用初始化）
+
+  worker:
+    # Worker 处理异步任务（邮件发送等）
+    image: crpi-y387mtxqhofw4ibe.cn-guangzhou.personal.cr.aliyuncs.com/xieminwyc/ai-chat:latest
+    command: ["node", "scripts/worker.mjs"]
+    restart: unless-stopped
+    env_file:
+      - .env.production
+    environment:
+      - NODE_ENV=production
+    depends_on:
+      redis:
+        condition: service_healthy
+    # Worker 不需要暴露端口，只需内部网络访问 Redis 和数据库
 
 volumes:
   redis-data:

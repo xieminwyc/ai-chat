@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const repository = vi.hoisted(() => ({
   createChat: vi.fn(),
+  createChatWithFirstMessage: vi.fn(),
   createMessage: vi.fn(),
   deleteChat: vi.fn(),
   getChatById: vi.fn(),
@@ -136,7 +137,7 @@ describe("chat-service", () => {
     repository.getConversationMessages.mockResolvedValue([
       { role: "user", content: "新会话的第一条消息" },
     ]);
-    repository.createChat.mockResolvedValue({
+    repository.createChatWithFirstMessage.mockResolvedValue({
       id: "chat_new",
       title: "测试标题",
       userId: "user_1",
@@ -153,12 +154,11 @@ describe("chat-service", () => {
     expect(provider.createAssistantReply).toHaveBeenCalledWith("新会话的第一条消息", {
       mode: "title",
     });
-    expect(repository.createChat).toHaveBeenCalledWith("测试标题", owner);
-    expect(repository.createMessage).toHaveBeenCalledWith({
-      chatId: "chat_new",
-      role: "user",
-      content: "新会话的第一条消息",
-    });
+    expect(repository.createChatWithFirstMessage).toHaveBeenCalledWith(
+      "测试标题",
+      owner,
+      "新会话的第一条消息"
+    );
     expect(result).toEqual({
       chatId: "chat_new",
       replyStream,
@@ -175,7 +175,7 @@ describe("chat-service", () => {
     repository.getConversationMessages.mockResolvedValue([
       { role: "user", content: "游客第一条消息" },
     ]);
-    repository.createChat.mockResolvedValue({
+    repository.createChatWithFirstMessage.mockResolvedValue({
       id: "chat_guest_1",
       title: "游客标题",
       userId: null,
@@ -193,14 +193,13 @@ describe("chat-service", () => {
       message: "游客第一条消息",
     });
 
-    expect(repository.createChat).toHaveBeenCalledWith("游客标题", owner);
+    expect(repository.createChatWithFirstMessage).toHaveBeenCalledWith(
+      "游客标题",
+      owner,
+      "游客第一条消息"
+    );
     expect(guestService.assertGuestMessageQuotaAvailable).toHaveBeenCalledWith("guest_1");
     expect(guestService.consumeGuestMessageQuota).toHaveBeenCalledWith("guest_1");
-    expect(repository.createMessage).toHaveBeenCalledWith({
-      chatId: "chat_guest_1",
-      role: "user",
-      content: "游客第一条消息",
-    });
     expect(result).toEqual({
       chatId: "chat_guest_1",
       replyStream,
@@ -224,8 +223,7 @@ describe("chat-service", () => {
     expect(guestService.assertGuestMessageQuotaAvailable).toHaveBeenCalledWith("guest_1");
     expect(guestService.consumeGuestMessageQuota).not.toHaveBeenCalled();
     expect(provider.createAssistantReply).not.toHaveBeenCalled();
-    expect(repository.createChat).not.toHaveBeenCalled();
-    expect(repository.createMessage).not.toHaveBeenCalled();
+    expect(repository.createChatWithFirstMessage).not.toHaveBeenCalled();
     expect(provider.streamAssistantReply).not.toHaveBeenCalled();
   });
 
@@ -233,14 +231,8 @@ describe("chat-service", () => {
     const owner = { kind: "guest" as const, guestSessionId: "guest_1" };
     const persistenceFailure = new Error("database write failed");
 
-    repository.createChat.mockResolvedValue({
-      id: "chat_guest_1",
-      title: "游客标题",
-      userId: null,
-      guestSessionId: "guest_1",
-    });
+    repository.createChatWithFirstMessage.mockRejectedValue(persistenceFailure);
     provider.createAssistantReply.mockReturnValue("游客标题");
-    repository.createMessage.mockRejectedValue(persistenceFailure);
 
     await expect(
       prepareChatReply({
@@ -249,11 +241,11 @@ describe("chat-service", () => {
       }),
     ).rejects.toThrow("database write failed");
 
-    expect(repository.createMessage).toHaveBeenCalledWith({
-      chatId: "chat_guest_1",
-      role: "user",
-      content: "游客第一条消息",
-    });
+    expect(repository.createChatWithFirstMessage).toHaveBeenCalledWith(
+      "游客标题",
+      owner,
+      "游客第一条消息"
+    );
     expect(guestService.assertGuestMessageQuotaAvailable).toHaveBeenCalledWith("guest_1");
     expect(guestService.consumeGuestMessageQuota).not.toHaveBeenCalled();
     expect(provider.streamAssistantReply).not.toHaveBeenCalled();

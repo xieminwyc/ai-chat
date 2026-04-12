@@ -1,3 +1,4 @@
+import { prisma } from "@/lib/prisma";
 import {
   createEmailVerificationToken as createEmailVerificationTokenRecord,
   createPasswordResetToken as createPasswordResetTokenRecord,
@@ -22,6 +23,7 @@ import {
   updateSessionLastActiveAt,
   updateUserPasswordHash,
 } from "@/server/auth/auth-repository";
+import { withTransaction } from "@/server/shared/database/transaction";
 import {
   CurrentPasswordIncorrectError,
   EmailAlreadyExistsError,
@@ -402,18 +404,45 @@ export async function changePasswordForUser({
   }
 
   const nextPasswordHash = await hashPassword(nextPassword);
-  const updatedUser = await updateUserPasswordHash(userId, nextPasswordHash);
-  // 改密码后，当前用户的 cached session 里都还是旧安全状态，先全部失效。
-  await deleteSessionCachesForUser(userId);
 
-  // 改密码后撤销所有其他 session，提升安全性
-  if (currentSessionToken) {
-    // 保留当前 session，撤销其他所有 session
-    await deleteAllUserSessionsExcept(userId, currentSessionToken);
-  } else {
-    // 撤销所有 session（包括当前的）
-    await deleteAllUserSessions(userId);
-  }
+  // 使用事务确保密码更新和 session 撤销原子性完成
+  // 如果 session 撤销失败，密码更新也会回滚
+  const updatedUser = await prisma.$transaction(async (tx) => {
+    // 在事务内更新密码
+    const updated = await tx.user.update({
+      where: { id: userId },
+      data: { passwordHash: nextPasswordHash },
+      select: {
+        id: true,
+        email: true,
+        emailVerifiedAt: true,
+        createdAt: true,
+        updatedAt: true,
+      },
+    });
+
+    // 在事务内撤销其他 session
+    if (currentSessionToken) {
+      // 保留当前 session，撤销其他所有 session
+      await tx.session.deleteMany({
+        where: {
+          userId,
+          token: { not: currentSessionToken },
+        },
+      });
+    } else {
+      // 撤销所有 session（包括当前的）
+      await tx.session.deleteMany({
+        where: { userId },
+      });
+    }
+
+    return updated;
+  });
+
+  // 事务成功后，清理缓存（缓存操作不需要在事务内）
+  // 即使缓存清理失败，事务已经提交，密码已经更改
+  await deleteSessionCachesForUser(userId);
 
   return updatedUser;
 }
@@ -464,21 +493,38 @@ export async function resetPasswordWithToken({
   const nextPasswordHash = await hashPassword(nextPassword);
   const usedAt = new Date();
 
-  await updateUserPasswordHash(resetToken.userId, nextPasswordHash);
-  await markPasswordResetTokenUsed(resetToken.id, usedAt);
-  // 重置密码后所有登录态都不可信，先删缓存再删 session 记录。
+  // 使用事务确保密码重置和 token 标记、session 撤销原子性完成
+  const result = await prisma.$transaction(async (tx) => {
+    // 在事务内更新密码
+    await tx.user.update({
+      where: { id: resetToken.userId },
+      data: { passwordHash: nextPasswordHash },
+    });
+
+    // 在事务内标记 token 已使用
+    await tx.passwordResetToken.update({
+      where: { id: resetToken.id },
+      data: { usedAt },
+    });
+
+    // 在事务内撤销所有 session
+    await tx.session.deleteMany({
+      where: { userId: resetToken.userId },
+    });
+
+    return {
+      id: resetToken.user.id,
+      email: resetToken.user.email,
+      emailVerifiedAt: resetToken.user.emailVerifiedAt,
+      createdAt: resetToken.user.createdAt,
+      updatedAt: usedAt,
+    };
+  });
+
+  // 事务成功后，清理缓存
   await deleteSessionCachesForUser(resetToken.userId);
 
-  // 密码重置后撤销该用户的所有 session，强制用户重新登录
-  await deleteAllUserSessions(resetToken.userId);
-
-  return {
-    id: resetToken.user.id,
-    email: resetToken.user.email,
-    emailVerifiedAt: resetToken.user.emailVerifiedAt,
-    createdAt: resetToken.user.createdAt,
-    updatedAt: usedAt,
-  };
+  return result;
 }
 
 // ========== Session 管理相关方法 ==========

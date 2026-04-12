@@ -33,12 +33,17 @@ const rateLimitPolicies = vi.hoisted(() => ({
   enforceChatMessageRateLimit: vi.fn(),
 }));
 
+const chatRepository = vi.hoisted(() => ({
+  listChatsPaginated: vi.fn(),
+}));
+
 vi.mock("@/server/chat/chat-service", () => service);
 vi.mock("@/server/chat/chat-stream", () => stream);
 vi.mock("@/server/auth/auth-service", () => authService);
 vi.mock("@/server/guest/guest-service", () => guestService);
 vi.mock("@/server/guest/guest-session", () => guestSession);
 vi.mock("@/server/rate-limit/rate-limit-policies", () => rateLimitPolicies);
+vi.mock("@/server/chat/chat-repository", () => chatRepository);
 
 import { DELETE, GET, PATCH, POST } from "@/app/api/chat/route";
 
@@ -51,6 +56,11 @@ describe("/api/chat route", () => {
     service.prepareChatReply.mockReset();
     service.renameChat.mockReset();
     service.deleteChatById.mockReset();
+    chatRepository.listChatsPaginated.mockResolvedValue({
+      items: [],
+      nextCursor: null,
+      hasMore: false,
+    });
     authService.getCurrentSession.mockResolvedValue({
       id: "session_1",
       token: "session-token",

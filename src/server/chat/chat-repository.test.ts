@@ -22,6 +22,7 @@ vi.mock("@/lib/prisma", () => ({
 
 import {
   createChat,
+  createChatWithFirstMessage,
   createMessage,
   getChatById,
   getChatMessages,
@@ -181,5 +182,37 @@ describe("chat-repository", () => {
         content: "你好",
       },
     });
+  });
+});
+
+describe("createChatWithFirstMessage (transaction-based)", () => {
+  it("应该在事务中同时创建 Chat 和 Message", async () => {
+    const mockChat = {
+      id: "chat_1",
+      title: "测试标题",
+      userId: null,
+      guestSessionId: "guest_1",
+    };
+
+    prisma.$transaction = vi.fn().mockImplementation(async (callback) => {
+      // 模拟事务执行
+      return await callback({
+        chat: {
+          create: vi.fn().mockResolvedValue(mockChat),
+        },
+        message: {
+          create: vi.fn().mockResolvedValue({}),
+        },
+      } as unknown as typeof prisma);
+    });
+
+    const result = await createChatWithFirstMessage(
+      "测试标题",
+      { kind: "guest", guestSessionId: "guest_1" },
+      "第一条消息"
+    );
+
+    expect(prisma.$transaction).toHaveBeenCalled();
+    expect(result).toEqual(mockChat);
   });
 });

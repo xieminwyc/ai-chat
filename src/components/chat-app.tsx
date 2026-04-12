@@ -4,6 +4,8 @@ import dayjs from "dayjs";
 import Link from "next/link";
 import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
 
+import { useInfiniteScroll } from "@/hooks/use-infinite-scroll";
+
 import {
   getApiError,
   getApiErrorMessage,
@@ -90,7 +92,7 @@ function getAuthFeedbackMessage(
     backendErrorCode === "auth.invalid_credentials" ||
     backendErrorMessage === "Invalid email or password"
   ) {
-    return "邮箱或密码不正确。如果你还没注册，可以先切到“注册”创建账号。";
+    return "邮箱或密码不正确。如果你还没注册，可以先切到「注册」创建账号。";
   }
 
   if (
@@ -104,7 +106,7 @@ function getAuthFeedbackMessage(
     backendErrorCode === "auth.email_already_exists" ||
     backendErrorMessage === "A user with this email already exists"
   ) {
-    return "这个邮箱已经注册过了，可以直接切到“登录”。";
+    return "这个邮箱已经注册过了，可以直接切到「登录」。";
   }
 
   if (
@@ -133,7 +135,6 @@ export function ChatApp({ initialData }: { initialData: HomePageData }) {
   const [currentUser, setCurrentUser] = useState(initialData.currentUser);
   const [mergeCandidate, setMergeCandidate] = useState(initialData.mergeCandidate);
   const [guestSession, setGuestSession] = useState(initialData.guestSession);
-  const [chats, setChats] = useState<ChatSummary[]>(initialData.initialChats);
   const [messages, setMessages] = useState<ChatMessage[]>(
     initialData.initialMessages,
   );
@@ -158,13 +159,45 @@ export function ChatApp({ initialData }: { initialData: HomePageData }) {
     useState<AuthFeedbackTone | null>(null);
   const [error, setError] = useState<string | null>(null);
   const messagesViewportRef = useRef<HTMLDivElement | null>(null);
-  const activeChat = chats.find((chat) => chat.id === chatId);
-  const activeChatTitle = activeChat?.title ?? "新的对话";
-  const activeChatUpdatedAt = formatChatUpdatedAt(activeChat?.updatedAt);
   const hasMessages = messages.length > 0;
   const hasAuthError = authFeedbackTone === "error";
   const isGuest = viewerKind === "guest";
   const isAuthLocked = !isAuthenticated && viewerKind !== "guest";
+
+  // 无限滚动加载聊天列表（需要在 isAuthLocked 之后定义）
+  const {
+    items: chats,
+    isLoading: isLoadingChats,
+    hasMore: hasMoreChats,
+    loadMore: loadMoreChats,
+    reload: reloadChats,
+    reset: resetChats,
+    observerTarget,
+  } = useInfiniteScroll<ChatSummary, { chats: ChatSummary[]; nextCursor: string | null; hasMore: boolean }>({
+    fetchFn: async (cursor) => {
+      const params = new URLSearchParams();
+      if (cursor) params.set("cursor", cursor);
+      params.set("limit", "20");
+
+      const response = await fetch(`/api/chat?${params}`);
+      if (!response.ok) {
+        throw new Error("加载聊天列表失败");
+      }
+      return response.json();
+    },
+    getItems: (res) => res.chats,
+    getNextCursor: (res) => res.nextCursor,
+    getHasMore: (res) => res.hasMore,
+    enabled: !isAuthLocked,
+    initialItems: initialData.initialChats,
+    initialHasMore: initialData.initialChats.length >= 20, // 初始数据满20条可能有更多
+  });
+
+  // 依赖 chats 的计算属性
+  const activeChat = chats.find((chat) => chat.id === chatId);
+  const activeChatTitle = activeChat?.title ?? "新的对话";
+  const activeChatUpdatedAt = formatChatUpdatedAt(activeChat?.updatedAt);
+
   const isVerificationPending =
     isAuthenticated && currentUser?.isEmailVerified === false;
   const shouldShowMergePrompt =
@@ -226,6 +259,17 @@ export function ChatApp({ initialData }: { initialData: HomePageData }) {
     window.history.replaceState(null, "", nextUrl.toString());
   }, []);
 
+  // 首次加载聊天列表（只在初始数据为空时加载）
+  const hasLoadedChats = useRef(false);
+  useEffect(() => {
+    // 如果有初始数据，不需要加载；只有初始数据为空时才加载
+    if (!isAuthLocked && !hasLoadedChats.current && initialData.initialChats.length === 0) {
+      hasLoadedChats.current = true;
+      void loadMoreChats();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isAuthLocked]);
+
   const moveToSignedOutState = useCallback((
     message: string,
     options?: SignedOutStateOptions,
@@ -240,7 +284,7 @@ export function ChatApp({ initialData }: { initialData: HomePageData }) {
     setIsAuthenticated(false);
     setCurrentUser(null);
     setGuestSession(null);
-    setChats([]);
+    resetChats();
     if (!preserveMessages) {
       setMessages([]);
     }
@@ -360,35 +404,6 @@ export function ChatApp({ initialData }: { initialData: HomePageData }) {
     }
   }
 
-  async function loadChatList() {
-    if (isAuthLocked) {
-      setChats([]);
-      return;
-    }
-
-    try {
-      const response = await fetch("/api/chat");
-      const data = (await response.json()) as ApiErrorPayload & {
-        chats?: ChatSummary[];
-      };
-
-      if (response.status === 401) {
-        moveToSignedOutState(getApiErrorMessage(data, sessionExpiredMessage), {
-          preserveMessages: true,
-        });
-        return;
-      }
-
-      if (!response.ok) {
-        throw new Error(getApiErrorMessage(data, "读取会话列表失败"));
-      }
-
-      setChats(data.chats ?? []);
-    } catch (error) {
-      setError(error instanceof Error ? error.message : "读取会话列表失败");
-    }
-  }
-
   async function handleRenameChat() {
     if (!chatId) {
       return;
@@ -424,7 +439,7 @@ export function ChatApp({ initialData }: { initialData: HomePageData }) {
         throw new Error(getApiErrorMessage(data, "更新标题失败"));
       }
 
-      await loadChatList();
+      await reloadChats();
       setIsRenaming(false);
       setTitleDraft("");
     } catch (error) {
@@ -463,7 +478,7 @@ export function ChatApp({ initialData }: { initialData: HomePageData }) {
       setChatId(null);
       setIsRenaming(false);
       setTitleDraft("");
-      setChats((current) => current.filter((chat) => chat.id !== chatId));
+      void reloadChats(); // 重新加载聊天列表
       setMessages([]);
       window.localStorage.removeItem("activeChatId");
       syncChatIdToUrl(null);
@@ -601,7 +616,7 @@ export function ChatApp({ initialData }: { initialData: HomePageData }) {
       setIsAuthenticated(false);
       setCurrentUser(null);
       setGuestSession(null);
-      setChats([]);
+      resetChats();
       setMessages([]);
       setChatId(null);
       window.localStorage.removeItem("activeChatId");
@@ -672,7 +687,7 @@ export function ChatApp({ initialData }: { initialData: HomePageData }) {
       setGuestSession(null);
       setMergeFeedback("游客历史已合并到当前账号。");
       setMergeFeedbackTone("success");
-      await loadChatList();
+      await reloadChats();
     } catch (error) {
       setMergeFeedback(error instanceof Error ? error.message : "合并游客历史失败");
       setMergeFeedbackTone("error");
@@ -839,7 +854,7 @@ export function ChatApp({ initialData }: { initialData: HomePageData }) {
         );
       }
 
-      await loadChatList();
+      await reloadChats();
     } catch (error) {
       setError(error instanceof Error ? error.message : "发送消息时出错了");
     } finally {
@@ -1193,7 +1208,7 @@ export function ChatApp({ initialData }: { initialData: HomePageData }) {
   }
 
   return (
-    <main className="relative min-h-[100svh] overflow-hidden px-4 py-4 text-slate-950 sm:px-6 sm:py-6 lg:px-8 lg:py-8">
+    <main className="relative h-[100svh] overflow-hidden px-4 py-4 text-slate-950 sm:px-6 sm:py-6 lg:px-8 lg:py-8">
       <div
         aria-hidden="true"
         className="pointer-events-none absolute inset-0 overflow-hidden"
@@ -1206,57 +1221,50 @@ export function ChatApp({ initialData }: { initialData: HomePageData }) {
       </div>
 
       <div className="relative mx-auto h-full w-full max-w-[96rem]">
-        <section className="grid h-full min-h-0 gap-4 xl:grid-cols-[320px_minmax(0,1fr)]">
-          <aside className="hidden min-h-0 flex-col overflow-hidden rounded-[2.25rem] border border-[rgba(19,36,51,0.1)] bg-[linear-gradient(180deg,rgba(255,251,245,0.78),rgba(243,235,224,0.6))] p-5 shadow-[0_28px_80px_rgba(19,36,51,0.12)] backdrop-blur-2xl xl:flex">
-            <div className="shrink-0 rounded-[1.9rem] border border-white/75 bg-[linear-gradient(180deg,rgba(255,252,248,0.95),rgba(245,237,226,0.78))] p-5 shadow-[0_20px_45px_rgba(19,36,51,0.08)]">
-              <div className="flex items-start justify-between gap-3">
+        <section className="grid h-full min-h-0 gap-4 lg:grid-cols-[320px_minmax(0,1fr)]">
+          <aside className="hidden h-full min-h-0 lg:flex lg:flex-col rounded-[2.25rem] border border-[rgba(19,36,51,0.1)] bg-[linear-gradient(180deg,rgba(255,251,245,0.78),rgba(243,235,224,0.6))] p-4 shadow-[0_28px_80px_rgba(19,36,51,0.12)] backdrop-blur-2xl overflow-hidden">
+            <div className="shrink-0 rounded-[1.9rem] border border-white/75 bg-[linear-gradient(180deg,rgba(255,252,248,0.95),rgba(245,237,226,0.78))] p-4 shadow-[0_20px_45px_rgba(19,36,51,0.08)]">
+              <div className="flex items-start justify-between gap-2">
                 <div>
-                  <p className="text-[11px] font-semibold uppercase tracking-[0.34em] text-slate-500">
+                  <p className="text-[10px] font-semibold uppercase tracking-[0.3em] text-slate-500">
                     Issue 01
                   </p>
-                  <h1 className="mt-4 font-display text-[2.2rem] leading-none tracking-[-0.04em] text-slate-950">
+                  <h1 className="mt-2 font-display text-[1.5rem] leading-none tracking-[-0.04em] text-slate-950">
                     AI Chat Studio
                   </h1>
                 </div>
-                <span className="rounded-full border border-[rgba(19,36,51,0.1)] bg-white/75 px-3 py-1.5 text-[10px] font-semibold uppercase tracking-[0.28em] text-slate-500">
-                  Calm Editorial
+                <span className="rounded-full border border-[rgba(19,36,51,0.1)] bg-white/75 px-2 py-1 text-[9px] font-semibold uppercase tracking-[0.25em] text-slate-500">
+                  Calm
                 </span>
               </div>
-              <p className="mt-4 text-sm leading-7 text-slate-600">
-                {isAuthenticated
-                  ? `当前账号：${currentUserLabel}`
-                  : isGuest
-                    ? guestStatusLabel
-                    : "先登录，再开始真正按账号隔离的聊天记录与权限控制"}
-              </p>
-              <div className="mt-6 grid grid-cols-3 gap-2">
-                <div className="rounded-[1.2rem] border border-[rgba(19,36,51,0.08)] bg-white/72 px-3 py-3">
-                  <p className="text-[10px] font-semibold uppercase tracking-[0.24em] text-slate-400">
+              <div className="mt-3 grid grid-cols-3 gap-1.5">
+                <div className="rounded-[1rem] border border-[rgba(19,36,51,0.08)] bg-white/72 px-2 py-2">
+                  <p className="text-[9px] font-semibold uppercase tracking-[0.2em] text-slate-400">
                     Mode
                   </p>
-                  <p className="mt-2 text-xs leading-5 text-slate-700">
+                  <p className="mt-1 text-xs leading-4 text-slate-700">
                     {workspaceModeLabel}
                   </p>
                 </div>
-                <div className="rounded-[1.2rem] border border-[rgba(19,36,51,0.08)] bg-white/72 px-3 py-3">
-                  <p className="text-[10px] font-semibold uppercase tracking-[0.24em] text-slate-400">
+                <div className="rounded-[1rem] border border-[rgba(19,36,51,0.08)] bg-white/72 px-2 py-2">
+                  <p className="text-[9px] font-semibold uppercase tracking-[0.2em] text-slate-400">
                     State
                   </p>
-                  <p className="mt-2 text-xs leading-5 text-slate-700">
+                  <p className="mt-1 text-xs leading-4 text-slate-700">
                     {workspaceStateLabel}
                   </p>
                 </div>
-                <div className="rounded-[1.2rem] border border-[rgba(19,36,51,0.08)] bg-white/72 px-3 py-3">
-                  <p className="text-[10px] font-semibold uppercase tracking-[0.24em] text-slate-400">
+                <div className="rounded-[1rem] border border-[rgba(19,36,51,0.08)] bg-white/72 px-2 py-2">
+                  <p className="text-[9px] font-semibold uppercase tracking-[0.2em] text-slate-400">
                     Saved
                   </p>
-                  <p className="mt-2 text-xs leading-5 text-slate-700">
+                  <p className="mt-1 text-xs leading-4 text-slate-700">
                     {savedSessionCount}
                   </p>
                 </div>
               </div>
               <button
-                className="mt-6 inline-flex min-h-11 w-full items-center justify-center rounded-full bg-[linear-gradient(135deg,#162738,#355469)] px-4 py-3 text-sm font-semibold text-white shadow-[0_18px_35px_rgba(19,36,51,0.2)] transition hover:translate-y-[-1px] hover:shadow-[0_22px_40px_rgba(19,36,51,0.22)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-500/40 disabled:cursor-not-allowed disabled:opacity-60"
+                className="mt-3 inline-flex h-9 w-full items-center justify-center rounded-full bg-[linear-gradient(135deg,#162738,#355469)] px-3 text-sm font-semibold text-white shadow-[0_18px_35px_rgba(19,36,51,0.2)] transition hover:translate-y-[-1px] hover:shadow-[0_22px_40px_rgba(19,36,51,0.22)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-500/40 disabled:cursor-not-allowed disabled:opacity-60"
                 disabled={isAuthLocked || isVerificationPending}
                 onClick={handleStartNewChat}
                 type="button"
@@ -1266,7 +1274,7 @@ export function ChatApp({ initialData }: { initialData: HomePageData }) {
             </div>
 
             {isRenaming ? (
-              <div className="mt-4 shrink-0 rounded-[1.5rem] border border-[rgba(24,48,59,0.1)] bg-white/74 p-4 shadow-sm">
+              <div className="mt-3 shrink-0 rounded-[1.5rem] border border-[rgba(24,48,59,0.1)] bg-white/74 p-3 shadow-sm">
                 <label className="block text-sm font-medium text-slate-700">
                   <span className="mb-2 block">会话标题</span>
                   <input
@@ -1299,7 +1307,7 @@ export function ChatApp({ initialData }: { initialData: HomePageData }) {
             ) : null}
 
             {chatId ? (
-              <div className="mt-4 grid shrink-0 gap-2">
+              <div className="mt-3 grid shrink-0 gap-2">
                 <button
                   className="inline-flex min-h-11 w-full items-center justify-center rounded-full border border-[rgba(24,48,59,0.12)] bg-white/78 px-4 py-3 text-sm font-medium text-slate-800 transition hover:bg-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-500/30 disabled:cursor-not-allowed disabled:opacity-60"
                   disabled={isLoading}
@@ -1323,28 +1331,28 @@ export function ChatApp({ initialData }: { initialData: HomePageData }) {
               </div>
             ) : null}
 
-            <div className="mt-4 min-h-0 flex-1 overflow-y-auto pr-1">
+            <div className="mt-3 min-h-0 flex-1 overflow-y-auto pr-1">
               {isAuthLocked ? (
-                <div className="rounded-[1.5rem] border border-dashed border-[rgba(24,48,59,0.18)] bg-white/56 px-4 py-4 text-sm leading-6 text-slate-500">
+                <div className="rounded-[1.5rem] border border-dashed border-[rgba(24,48,59,0.18)] bg-white/56 px-3 py-3 text-sm leading-5 text-slate-500">
                   登录后，这里会显示当前账号自己的聊天列表，不会再是全局共享数据。
                 </div>
               ) : chats.length === 0 ? (
                 <div className="space-y-3">
-                  <div className="rounded-[1.5rem] border border-dashed border-[rgba(24,48,59,0.18)] bg-white/56 px-4 py-4 text-sm leading-6 text-slate-500">
+                  <div className="rounded-[1.5rem] border border-dashed border-[rgba(24,48,59,0.18)] bg-white/56 px-3 py-3 text-sm leading-5 text-slate-500">
                     {isGuest
                       ? "游客模式也会保留自己的历史对话。发出第一条消息后，这里会开始记录这次试用里的思路轨迹。"
                       : "还没有历史对话。发出第一条消息后，这里会开始记录你的思路轨迹。"}
                   </div>
-                  <div className="grid gap-2">
+                  <div className="grid gap-1.5">
                     {workspaceNotes.map((note) => (
                       <div
                         key={note.label}
-                        className="rounded-[1.35rem] border border-[rgba(24,48,59,0.08)] bg-white/76 px-4 py-3 shadow-sm"
+                        className="rounded-[1.35rem] border border-[rgba(24,48,59,0.08)] bg-white/76 px-3 py-2 shadow-sm"
                       >
-                        <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-500">
+                        <p className="text-[10px] font-semibold uppercase tracking-[0.22em] text-slate-500">
                           {note.label}
                         </p>
-                        <p className="mt-2 text-sm leading-6 text-slate-600">
+                        <p className="mt-1 text-xs leading-5 text-slate-600">
                           {note.value}
                         </p>
                       </div>
@@ -1362,7 +1370,7 @@ export function ChatApp({ initialData }: { initialData: HomePageData }) {
                     return (
                       <button
                         key={chat.id}
-                        className={`w-full rounded-[1.35rem] border px-4 py-3 text-left text-sm transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-500/30 ${
+                        className={`w-full rounded-[1.35rem] border px-3 py-2 text-left text-sm transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-500/30 ${
                           isActive
                             ? "border-transparent bg-[linear-gradient(135deg,#18303b,#325869)] text-white shadow-[0_16px_30px_rgba(24,48,59,0.22)]"
                             : "border-[rgba(24,48,59,0.08)] bg-white/76 text-slate-700 hover:bg-white"
@@ -1383,6 +1391,11 @@ export function ChatApp({ initialData }: { initialData: HomePageData }) {
                       </button>
                     );
                   })}
+                  {hasMoreChats && (
+                    <div ref={observerTarget} className="py-2 text-center text-xs text-slate-400">
+                      {isLoadingChats ? "加载中..." : "滚动加载更多"}
+                    </div>
+                  )}
                 </div>
               )}
             </div>

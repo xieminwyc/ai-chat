@@ -112,3 +112,46 @@ enum MessageRole {
   user
   assistant
 }
+
+// Job 表表示异步任务队列中的任务
+model Job {
+  id           String     @id @default(cuid())
+  type         JobType
+  status       JobStatus  @default(PENDING)
+  // 负载（任务参数），存储为 JSON
+  payload      Json
+  // 执行结果，存储为 JSON
+  result       Json?
+  errorMessage String?    @db.Text
+  // 重试控制
+  attempts     Int        @default(0)
+  maxAttempts  Int        @default(3)
+  // 时间追踪
+  availableAt  DateTime   @default(now()) @db.Timestamptz(3)
+  startedAt    DateTime?  @db.Timestamptz(3)
+  completedAt  DateTime?  @db.Timestamptz(3)
+  failedAt     DateTime?  @db.Timestamptz(3)
+  createdAt    DateTime   @default(now()) @db.Timestamptz(3)
+  updatedAt    DateTime   @default(now()) @db.Timestamptz(3)
+
+  @@index([status])
+  @@index([type])
+  @@index([availableAt])
+  @@index([status, availableAt])
+}
+
+// 任务类型枚举
+enum JobType {
+  SEND_VERIFICATION_EMAIL
+  SEND_PASSWORD_RESET_EMAIL
+}
+
+// 任务状态枚举
+enum JobStatus {
+  PENDING    // 等待执行
+  RUNNING    // 执行中
+  COMPLETED  // 成功完成
+  FAILED     // 失败（不再重试）
+  RETRYABLE  // 失败但可重试
+  CANCELLED  // 已取消
+}

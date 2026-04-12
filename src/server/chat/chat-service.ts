@@ -5,7 +5,7 @@ import {
 import { assertChatOwner } from "@/server/chat/chat-auth";
 import type { ChatOwner } from "@/server/chat/chat-types";
 import {
-  createChat,
+  createChatWithFirstMessage,
   createMessage,
   deleteChat,
   getChatById,
@@ -33,7 +33,11 @@ export async function loadChatMessages(owner: ChatOwner, chatId: string) {
   return getChatMessages(chatId, owner);
 }
 
-export async function renameChat(owner: ChatOwner, chatId: string, title: string) {
+export async function renameChat(
+  owner: ChatOwner,
+  chatId: string,
+  title: string,
+) {
   const chat = await getChatById(chatId, owner);
   assertChatOwner(chat, owner);
   return renameChatTitle(chatId, title);
@@ -59,21 +63,33 @@ export async function prepareChatReply({
     await assertGuestMessageQuotaAvailable(owner.guestSessionId);
   }
 
+  // 创建新 Chat（如果不存在）
+  // 使用事务版本确保 Chat 和第一条 Message 原子性创建
   const activeChat =
     existingChat ??
-    (await createChat(createAssistantReply(message, { mode: "title" }), owner));
+    (await createChatWithFirstMessage(
+      createAssistantReply(message, { mode: "title" }),
+      owner,
+      message,
+    ));
 
-  await createMessage({
-    chatId: activeChat.id,
-    role: "user",
-    content: message,
-  });
+  // 如果是已存在的 Chat，创建用户消息
+  if (existingChat) {
+    await createMessage({
+      chatId: activeChat.id,
+      role: "user",
+      content: message,
+    });
+  }
 
   if (owner.kind === "guest") {
     await consumeGuestMessageQuota(owner.guestSessionId);
   }
 
-  const conversationMessages = await getConversationMessages(activeChat.id, owner);
+  const conversationMessages = await getConversationMessages(
+    activeChat.id,
+    owner,
+  );
   const replyStream = await streamAssistantReply(conversationMessages);
 
   return {

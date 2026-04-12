@@ -55,6 +55,11 @@ const cacheService = vi.hoisted(() => ({
   setJson: vi.fn(),
 }));
 
+const prismaMock = vi.hoisted(() => ({
+  $transaction: vi.fn(),
+}));
+
+vi.mock("@/lib/prisma", () => ({ prisma: prismaMock }));
 vi.mock("@/server/auth/auth-repository", () => repository);
 vi.mock("@/server/cache/cache-service", () => ({
   getCacheService: () => cacheService,
@@ -82,6 +87,36 @@ describe("auth-service", () => {
     cacheService.getJson.mockResolvedValue(null);
     repository.findSessionsByUserId.mockResolvedValue([]);
     repository.updateSessionLastActiveAt.mockResolvedValue(undefined);
+    // 默认事务 mock：直接执行回调并返回结果
+    prismaMock.$transaction.mockImplementation(async (callback) => {
+      // 模拟事务执行，传入一个 mock tx 对象
+      // 注意：这里需要模拟 Prisma 的调用格式并转发到 repository 函数
+      const mockTx = {
+        user: {
+          update: vi.fn().mockImplementation(({ where, data }) => {
+            return repository.updateUserPasswordHash(where.id, data.passwordHash);
+          }),
+        },
+        session: {
+          deleteMany: vi.fn().mockImplementation((args) => {
+            // 根据 args 参数判断调用哪个 repository 函数
+            if (args.where?.token?.not) {
+              return repository.deleteAllUserSessionsExcept(
+                args.where.userId,
+                args.where.token.not
+              );
+            }
+            return repository.deleteAllUserSessions(args.where?.userId);
+          }),
+        },
+        passwordResetToken: {
+          update: vi.fn().mockImplementation(({ where, data }) => {
+            return repository.markPasswordResetTokenUsed(where.id, data.usedAt);
+          }),
+        },
+      };
+      return await callback(mockTx);
+    });
   });
 
   it("rejects duplicate registration attempts", async () => {

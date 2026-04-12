@@ -17,7 +17,10 @@
     "prisma:generate:pro": "APP_ENV=production node scripts/env.mjs prisma generate",
     "prisma:migrate:deploy": "APP_ENV=local node scripts/env.mjs prisma migrate deploy",
     "prisma:migrate:deploy:test": "APP_ENV=test node scripts/env.mjs prisma migrate deploy",
-    "prisma:migrate:deploy:pro": "APP_ENV=production node scripts/env.mjs prisma migrate deploy"
+    "prisma:migrate:deploy:pro": "APP_ENV=production node scripts/env.mjs prisma migrate deploy",
+    "worker": "APP_ENV=local node scripts/env.mjs tsx scripts/worker.ts",
+    "worker:test": "APP_ENV=test node scripts/env.mjs tsx scripts/worker.ts",
+    "worker:pro": "APP_ENV=production node scripts/env.mjs tsx scripts/worker.ts"
   },
   "dependencies": {
     "@prisma/adapter-pg": "^7.5.0",
@@ -47,6 +50,7 @@
     "jsdom": "^29.0.1",
     "prisma": "^7.5.0",
     "tailwindcss": "^4",
+    "tsx": "^4.21.0",
     "typescript": "^5",
     "vitest": "^4.1.1"
   }

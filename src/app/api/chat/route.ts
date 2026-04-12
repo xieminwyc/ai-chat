@@ -16,6 +16,8 @@ import {
   prepareChatReply,
   renameChat,
 } from "@/server/chat/chat-service";
+import { listChatsPaginated } from "@/server/chat/chat-repository";
+import type { CursorPaginationParams } from "@/server/shared/pagination/pagination-types";
 import { getCurrentGuestSession, getOrCreateGuestSession } from "@/server/guest/guest-service";
 import {
   getGuestCookieName,
@@ -199,14 +201,46 @@ export async function GET(request: Request) {
     const { chatId } = chatQuerySchema.parse({
       chatId: searchParams.get("chatId") ?? undefined,
     });
+
+    // 游标分页参数
+    const cursor = searchParams.get("cursor");
+    const limit = searchParams.get("limit");
+    const usePagination = cursor !== null || limit !== null;
+
     const actor = await resolveChatActorFromRequest(request, {
       allowGuestCreate: !chatId,
       requireVerifiedUser: false,
     });
 
     if (!chatId) {
-      logInfo("get.list.start");
+      logInfo("get.list.start", { usePagination });
 
+      if (usePagination) {
+        // 使用游标分页
+        const paginationParams: CursorPaginationParams = {
+          cursor: cursor || undefined,
+          limit: limit ? parseInt(limit, 10) : undefined,
+        };
+
+        const result = await listChatsPaginated(actor.owner, paginationParams);
+
+        logInfo("get.list.success", {
+          chatCount: result.items.length,
+          hasMore: result.hasMore,
+          durationMs: getDurationMs(startedAt),
+        });
+
+        return applyGuestCookie(
+          NextResponse.json({
+            chats: result.items,
+            nextCursor: result.nextCursor,
+            hasMore: result.hasMore,
+          }),
+          actor
+        );
+      }
+
+      // 使用原有逻辑（返回全部）
       const chats = await listChatSummaries(actor.owner);
 
       logInfo("get.list.success", {
