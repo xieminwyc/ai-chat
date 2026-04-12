@@ -53,9 +53,14 @@ require_env_var "SILICONFLOW_API_KEY"
 require_env_var "SILICONFLOW_BASE_URL"
 require_env_var "SILICONFLOW_MODEL"
 
-# ── 4.1 在服务器上执行 Prisma migration ──────────────────────
-log "running prisma migrations on server..."
-APP_ENV=production node scripts/env.mjs npx prisma migrate deploy
+# ── 4.1 使用临时容器执行 Prisma migration ────────────────────
+# 使用容器运行 migration，避免宿主机网络问题
+log "running prisma migrations using container..."
+docker run --rm \
+  --network ai-chat_default \
+  --env-file "$ENV_FILE" \
+  crpi-y387mtxqhofw4ibe.cn-guangzhou.personal.cr.aliyuncs.com/xieminwyc/ai-chat:latest \
+  npx prisma migrate deploy
 
 # ── 4. 登录阿里云 ACR ──────────────────────────────────────────
 # ACR_PASSWORD 需要提前在服务器 ~/.bashrc 或 /etc/environment 里配置：
