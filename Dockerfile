@@ -65,10 +65,8 @@ COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
 # CSS/JS 资源文件
 COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
 
-# standalone 的 file tracing 有时漏掉 Prisma 生成的客户端，手动补上
-COPY --from=builder --chown=nextjs:nodejs /app/node_modules/.prisma ./node_modules/.prisma
-COPY --from=builder --chown=nextjs:nodejs /app/node_modules/@prisma ./node_modules/@prisma
-COPY --from=builder --chown=nextjs:nodejs /app/node_modules/prisma ./node_modules/prisma
+# deploy 脚本会在运行镜像里执行 Prisma CLI；完整 node_modules 可以避免遗漏其传递依赖
+COPY --from=builder --chown=nextjs:nodejs /app/node_modules ./node_modules
 
 # prisma schema + migration 文件（docker-deploy.sh 用临时容器跑 migrate 时需要）
 COPY --from=builder --chown=nextjs:nodejs /app/prisma ./prisma
@@ -76,19 +74,6 @@ COPY --from=builder --chown=nextjs:nodejs /app/prisma.config.ts ./prisma.config.
 COPY --from=builder --chown=nextjs:nodejs /app/scripts/env.mjs ./scripts/env.mjs
 COPY --from=builder --chown=nextjs:nodejs /app/scripts/worker.mjs ./scripts/worker.mjs
 
-# Worker 需要的运行时依赖
-COPY --from=builder --chown=nextjs:nodejs /app/node_modules/.prisma ./node_modules/.prisma
-COPY --from=builder --chown=nextjs:nodejs /app/node_modules/@prisma ./node_modules/@prisma
-COPY --from=builder --chown=nextjs:nodejs /app/node_modules/prisma ./node_modules/prisma
-COPY --from=builder --chown=nextjs:nodejs /app/node_modules/pg ./node_modules/pg
-COPY --from=builder --chown=nextjs:nodejs /app/node_modules/bcryptjs ./node_modules/bcryptjs
-COPY --from=builder --chown=nextjs:nodejs /app/node_modules/dayjs ./node_modules/dayjs
-COPY --from=builder --chown=nextjs:nodejs /app/node_modules/ioredis ./node_modules/ioredis
-COPY --from=builder --chown=nextjs:nodejs /app/node_modules/resend ./node_modules/resend
-COPY --from=builder --chown=nextjs:nodejs /app/node_modules/zod ./node_modules/zod
-COPY --from=builder --chown=nextjs:nodejs /app/node_modules/dotenv ./node_modules/dotenv
-COPY --from=builder --chown=nextjs:nodejs /app/node_modules/get-tsconfig ./node_modules/get-tsconfig
-COPY --from=builder --chown=nextjs:nodejs /app/node_modules/tsx ./node_modules/tsx
 # Worker 脚本和源码
 COPY --from=builder --chown=nextjs:nodejs /app/scripts/worker.ts ./scripts/worker.ts
 COPY --from=builder --chown=nextjs:nodejs /app/src/server/queue ./src/server/queue

@@ -5,6 +5,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DEPLOY_SCRIPT_PATH="${ROOT_DIR}/scripts/docker-deploy.sh"
 DEPLOY_WORKFLOW_PATH="${ROOT_DIR}/.github/workflows/deploy.yml"
+DOCKERFILE_PATH="${ROOT_DIR}/Dockerfile"
 
 assert_contains() {
   local file_path="$1"
@@ -54,6 +55,7 @@ assert_contains "${DEPLOY_SCRIPT_PATH}" 'node node_modules/prisma/build/index.js
 assert_occurs_before "${DEPLOY_SCRIPT_PATH}" 'docker compose -f "$COMPOSE_FILE" pull' 'docker run --rm \'
 assert_contains "${DEPLOY_SCRIPT_PATH}" 'require_env_var "RESEND_API_KEY"'
 assert_contains "${DEPLOY_SCRIPT_PATH}" 'require_env_var "RESEND_FROM_EMAIL"'
+assert_contains "${DOCKERFILE_PATH}" 'COPY --from=builder --chown=nextjs:nodejs /app/node_modules ./node_modules'
 
 assert_contains "${DEPLOY_WORKFLOW_PATH}" 'ref: ${{ github.event.workflow_run.head_sha }}'
 
