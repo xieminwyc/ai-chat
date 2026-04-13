@@ -1,35 +1,44 @@
 # AI Chat
 
-一个基于 Next.js 16、Prisma 和 PostgreSQL 的学习型 AI 聊天项目。当前版本重点在于把聊天链路、数据库持久化、服务器部署和第一版 CI/CD 打通，方便持续练习全栈开发与上线流程。
+一个基于 Next.js 16、Prisma 7 和 PostgreSQL 的学习型 AI 聊天项目。支持流式回复、用户认证、游客试用、异步邮件队列和 Docker 部署。
 
 ## Tech Stack
 
-- Next.js 16
+- Next.js 16 (App Router, standalone output)
 - React 19
-- Prisma 7
-- PostgreSQL
-- Vitest
-- ESLint
-- PM2
-- Nginx
-- GitHub Actions
+- Prisma 7 (PostgreSQL, Neon)
+- Redis (ioredis, 缓存 + 限流 + 异步队列)
+- Resend (邮件发送)
+- OpenAI SDK (SiliconFlow API)
+- Vitest + Testing Library
+- Docker / Docker Compose
+- Nginx (反向代理)
+- GitHub Actions (CI → CD 自动部署到阿里云)
 
 ## Project Structure
 
-- `src/app/`
-  - App Router 页面和 API 路由
-- `src/components/`
-  - 聊天界面组件
-- `src/server/`
-  - 服务端聊天逻辑、流式回复、仓储层
-- `src/lib/`
-  - 共享工具、Prisma 客户端、测试
-- `prisma/`
-  - Prisma schema
-- `scripts/`
-  - 环境变量加载脚本和部署脚本模板
-- `.github/workflows/`
-  - CI/CD workflow
+```text
+src/
+├── app/                    # App Router 页面和 API 路由
+│   └── api/
+│       ├── auth/           # 登录、注册、会话管理
+│       ├── chat/           # 聊天 CRUD + 流式回复
+│       └── guest/          # 游客合并
+├── components/             # 聊天界面组件
+├── server/
+│   ├── auth/               # 认证：仓储层、服务层、错误、Schema
+│   ├── chat/               # 聊天：仓储层、服务层、流式回复
+│   ├── guest/              # 游客试用（3 条免费消息）
+│   ├── queue/              # 异步任务队列 (Redis + PostgreSQL)
+│   │   └── worker/         # Worker 运行时 + 处理器
+│   ├── rate-limit/         # 令牌桶 + 滑动窗口限流
+│   ├── cache/              # Cache-Aside 缓存服务 (Redis)
+│   └── shared/             # 通用错误、分页、事务
+├── lib/                    # Prisma 客户端、Redis 客户端、工具
+prisma/                     # Prisma schema + migrations
+scripts/                    # 环境变量加载、部署脚本、Worker 入口
+.github/workflows/          # CI/CD workflow
+```
 
 ## Local Setup
 
@@ -57,20 +66,64 @@ npm run dev
 http://localhost:3000
 ```
 
+4. （可选）启动本地 Worker
+
+```bash
+npm run worker
+```
+
+## npm Scripts
+
+### 开发服务器
+
+```bash
+npm run dev          # 加载 .env.local
+npm run dev:local    # 同上
+npm run dev:test     # 加载 .env.test
+npm run dev:pro      # 加载 .env.production
+```
+
+环境切换通过 `APP_ENV`（不是 `NODE_ENV`），`next dev` 始终是开发模式。
+
+### Worker
+
+```bash
+npm run worker          # 本地开发 (APP_ENV=local)
+npm run worker:test     # 测试环境
+npm run worker:pro      # 生产环境
+```
+
+Worker 处理异步任务（发送验证邮件、密码重置邮件），通过 Redis 接收通知、PostgreSQL 持久化任务状态。
+
+### Prisma
+
+```bash
+npm run prisma:generate            # 生成本地 Client
+npm run prisma:generate:test       # 生成测试环境 Client
+npm run prisma:generate:pro        # 生成生产环境 Client
+npm run prisma:migrate:deploy      # 部署本地 migration
+npm run prisma:migrate:deploy:test # 部署测试环境 migration
+npm run prisma:migrate:deploy:pro  # 部署生产环境 migration
+```
+
+### 质量检查
+
+```bash
+npm run lint
+npm run test
+npm run build
+```
+
 ## Environment Files
 
-项目目前约定了 4 类环境文件：
+| 文件 | 用途 | 提交到仓库 |
+|------|------|------------|
+| `.env.example` | 示例值 | 是 |
+| `.env.local` | 本地真实配置 | 否 |
+| `.env.test` | 测试环境配置 | 否 |
+| `.env.production` | 生产配置 | 否 |
 
-- `.env.example`
-  - 只放示例值，提交到仓库
-- `.env.local`
-  - 本地真实开发配置，不提交
-- `.env.test`
-  - 本地切换到测试链路时使用的配置
-- `.env.production`
-  - 本地模拟偏生产配置时使用的配置
-
-目前需要的关键变量：
+关键变量：
 
 ```env
 APP_URL=
@@ -83,155 +136,113 @@ SILICONFLOW_BASE_URL=
 SILICONFLOW_MODEL=
 ```
 
-仓库中只保留 `.env.example`。`.env.local`、`.env.test`、`.env.production` 都应当只存在于本机或服务器，不要提交进仓库。
-
-Docker Compose 线上部署时：
-
-- GitHub Actions 只负责通过 SSH 触发服务器部署脚本
-- 服务器上的 `scripts/docker-deploy.sh` 使用本地 `.env.production` 执行 migration
-- 服务器本地 `/root/apps/ai-chat/.env.production` 提供运行时真实值
-
-## Scripts
-
-### App commands
-
-```bash
-npm run dev
-npm run dev:local
-npm run dev:test
-npm run dev:pro
-```
-
-含义：
-
-- `dev` / `dev:local`
-  - 加载 `.env.local`
-- `dev:test`
-  - 加载 `.env.test`
-- `dev:pro`
-  - 加载 `.env.production`
-
-这里切换的是 `APP_ENV`，不是强行切换 `NODE_ENV`。这样 `next dev` 仍然保持开发模式，同时 Prisma 和应用能共用同一套 env 选择逻辑。
-
-### Prisma commands
-
-```bash
-npm run prisma:generate
-npm run prisma:generate:test
-npm run prisma:generate:pro
-npm run prisma:migrate:deploy
-npm run prisma:migrate:deploy:test
-npm run prisma:migrate:deploy:pro
-```
-
-### Quality commands
-
-```bash
-npm run lint
-npm run test
-npm run build
-```
-
-## How Env Loading Works
-
-- `scripts/env.mjs` 根据 `APP_ENV` 选择 `.env.local`、`.env.test` 或 `.env.production`
-- `prisma.config.ts` 也调用同一个 loader
-- 对于 `next dev`，会先把目标 env 文件注入 `process.env`
-- 因为 `process.env` 的优先级高于 `.env.*` 文件，`dev:test` 和 `dev:pro` 可以覆盖默认的 `.env.local`
+环境加载机制：`scripts/env.mjs` 根据 `APP_ENV` 选择对应 `.env.*` 文件，`prisma.config.ts` 也复用同一逻辑。
 
 ## Deployment Architecture
 
-当前线上结构：
-
 ```text
-Browser
--> Nginx :80
--> ai-chat container :3000
--> redis container :6379 (internal only)
--> Neon PostgreSQL
+Browser → Nginx :80 → ai-chat container :3000 → Neon PostgreSQL
+                          ↕
+                    redis container :6379 (Docker 内部网络)
 ```
 
-服务器职责：
-
-- Nginx 反向代理到 Docker 容器内的 3000 端口
-- Docker Compose 同机托管 `ai-chat` 和 `redis`
+- Nginx 反向代理到容器 3000 端口
+- Docker Compose 同机托管 `ai-chat`、`worker`、`redis`
 - Redis 只走 Docker 内部网络，不开放公网 6379
-- 服务器本地 `.env.production` 保存真实生产环境变量
+- 服务器本地 `.env.production` 提供运行时真实值
+- Worker 与 ai-chat 共用同一镜像，通过不同 command 启动
 
-仓库中的 `scripts/deploy.sh` 是标准部署脚本模板，线上建议放在：
+### Dockerfile
 
-```text
-/root/apps/ai-chat/scripts/deploy.sh
+三阶段构建：`deps`（装依赖）→ `builder`（next build）→ `runner`（最小运行镜像）。使用 `output: standalone`，最终镜像只包含运行时必需产物。
+
+### compose.yml
+
+三个服务：
+
+- **redis** — `redis:7-alpine`，开启 AOF 持久化，仅内部网络
+- **ai-chat** — 应用主容器，暴露 3000 端口，依赖 redis 健康检查
+- **worker** — 异步任务处理器，不暴露端口，依赖 redis
+
+镜像从阿里云 ACR 拉取：`crpi-y387mtxqhofw4ibe.cn-guangzhou.personal.cr.aliyuncs.com/xieminwyc/ai-chat:latest`
+
+## Server Commands
+
+在服务器 `/root/apps/ai-chat` 目录下执行。
+
+### 服务管理
+
+```bash
+docker compose up -d          # 启动所有服务
+docker compose down            # 停止所有服务
+docker compose restart ai-chat # 重启应用
+docker compose restart worker  # 重启 Worker
+docker compose ps              # 查看容器状态
 ```
 
-它负责：
+### 日志查看
 
-- `git pull origin main`
-- `npm ci`
-- `npx prisma migrate deploy`
-- `npm run build`
-- `pm2 restart ai-chat`
-- 健康检查
+```bash
+docker compose logs ai-chat -f           # 跟踪应用日志
+docker compose logs worker -f             # 跟踪 Worker 日志
+docker compose logs redis -f              # 跟踪 Redis 日志
+docker compose logs ai-chat --tail 100    # 最近 100 行
+docker compose logs worker --err --tail 50 # 只看错误日志
+```
+
+### 更新部署
+
+```bash
+# 一键部署（走 deploy 脚本，包含 git pull + migrate + pull image + restart）
+bash scripts/docker-deploy.sh
+
+# 手动更新步骤
+git pull origin main
+docker compose -f compose.yml pull
+docker run --rm --network ai-chat_default \
+  -e DATABASE_URL \
+  crpi-y387mtxqhofw4ibe.cn-guangzhou.personal.cr.aliyuncs.com/xieminwyc/ai-chat:latest \
+  node node_modules/prisma/build/index.js migrate deploy --schema prisma/schema.prisma
+docker compose -f compose.yml up -d
+```
+
+### 健康检查 & 排错
+
+```bash
+curl -f http://localhost:3000               # 应用健康检查
+docker compose exec redis redis-cli ping     # Redis 连通性
+docker compose exec ai-cat sh                # 进入应用容器
+docker stats --no-stream                     # 容器资源占用
+```
 
 ## CI/CD
 
-### CI
+### CI (`.github/workflows/ci.yml`)
 
-文件：
+触发：PR 和 push 到 `main`
 
-- `.github/workflows/ci.yml`
-
-触发：
-
-- `pull_request` 到 `main`
-- `push` 到 `main`
-
-执行：
-
-- `npm ci`
-- `npm run lint`
-- `npm run test`
-- `npm run build`
+执行：`npm ci` → `lint` → `test` → `build` → 构建 Docker 镜像 → 推送到阿里云 ACR
 
 CI 只使用安全占位值，不使用真实生产密钥。
 
-### CD
+### CD (`.github/workflows/deploy.yml`)
 
-文件：
+触发：CI 成功 + push 到 `main`
 
-- `.github/workflows/deploy.yml`
+部署：GitHub Actions SSH 登录服务器 → 执行 `scripts/docker-deploy.sh`
 
-触发方式：
+### GitHub Secrets
 
-- 监听 `CI` workflow 成功完成
-- 仅在 `main` 分支的 `push` 后部署
+| Secret | 用途 |
+|--------|------|
+| `SERVER_HOST` | 服务器 IP |
+| `SERVER_PORT` | SSH 端口 |
+| `SERVER_USER` | SSH 用户名 |
+| `SERVER_SSH_KEY` | SSH 私钥 |
 
-部署方式：
+## Testing
 
-- GitHub Actions 通过 SSH 登录阿里云服务器
-- 执行服务器上的 `scripts/docker-deploy.sh`
-- 服务器脚本加载 `/root/apps/ai-chat/.env.production`，执行 `prisma migrate deploy` 后再拉镜像重启服务
-
-### Required GitHub Secrets
-
-需要在 GitHub 仓库中配置：
-
-- `SERVER_HOST`
-- `SERVER_PORT`
-- `SERVER_USER`
-- `SERVER_SSH_KEY`
-
-### Runtime Env Placement
-
-- 仓库：只保留 `.env.example`
-- 本地开发：自己创建 `.env.local`
-- 本地测试/演练：按需自己创建 `.env.test` / `.env.production`
-- 服务器运行时：维护 `/root/apps/ai-chat/.env.production`
-  - 至少包含 `APP_URL`、`DATABASE_URL`、`REDIS_URL`、`RESEND_*`、`SILICONFLOW_*`
-
-## Testing and Verification
-
-本地在提交前至少跑一遍：
+提交前至少跑一遍：
 
 ```bash
 npm run lint
@@ -239,13 +250,17 @@ npm run test
 npm run build
 ```
 
-如果你改了环境变量相关逻辑，可以单独跑：
+单独跑某个测试：
 
 ```bash
-npm run test -- src/lib/env-loader.test.ts
+npx vitest run src/server/auth/auth-service.test.ts
 ```
 
 ## Notes
 
-- 当前项目仍然优先学习和沉淀“可重复部署”的能力，Docker 化部署是下一阶段
-- 如果你刚刚在聊天或截图里暴露过真实 API key，记得立即去对应平台旋转或吊销
+- 推荐使用 Docker Compose 部署。如果需要用 pm2 在宿主机运行，注意以下事项：
+  - 应用必须用 `node .next/standalone/server.js` 启动（不是 `next start`，standalone 模式下 `next start` 无法正确工作）
+  - `REDIS_URL` 需改为 `redis://127.0.0.1:6379`（`redis://redis:6379` 只在 Docker 网络内生效，宿主机无法解析）
+  - Redis 容器需要映射端口到宿主机（compose.yml 里取消 redis 的 `ports` 注释）
+  - Worker 用 `npm run worker:pro` 启动，同样需要宿主机可访问的 Redis 地址
+- 暴露过真实 API key 后立即去对应平台轮换或吊销
